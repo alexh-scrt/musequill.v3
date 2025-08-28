@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from enum import Enum
 import json
 import uuid
+from pydantic import Field, BaseModel
 
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError,
