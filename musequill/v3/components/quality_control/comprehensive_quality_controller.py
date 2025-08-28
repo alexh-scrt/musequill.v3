@@ -17,10 +17,15 @@ from musequill.v3.components.base.component_interface import (
 )
 from musequill.v3.models.chapter_variant import ChapterVariant
 from musequill.v3.models.plot_coherence_assessment import PlotCoherenceAssessment
-from musequill.v3.models.literary_quality_assessment import LiteraryQualityAssessment
+from musequill.v3.models.literary_quality_assessment import (
+    LiteraryQualityAssessment,
+    ClicheSeverity
+)
 from musequill.v3.models.reader_engagement_assessment import ReaderEngagementAssessment
-from musequill.v3.models.market_intelligence import MarketIntelligence
-
+from musequill.v3.models.market_intelligence import (
+    MarketIntelligence,
+    ReaderPreferenceType
+)
 
 class QualityDecision(str, Enum):
     """Quality control decisions."""
