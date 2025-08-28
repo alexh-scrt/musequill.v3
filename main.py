@@ -17,14 +17,18 @@ import yaml
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
-
+from dotenv import load_dotenv, find_dotenv
 # Import enhanced registry and orchestration
 from musequill.v3.components.component_registry import setup_enhanced_component_system, create_enhanced_component_configurations
 from musequill.v3.components.base.component_interface import component_registry, ComponentError
 from musequill.v3.components.orchestration.enhanced_pipeline_orchestrator import EnhancedPipelineOrchestrator
 
 # Import pipeline configuration classes (save as separate module first)
-from musequill.v3.pipeline_configuration import PipelineConfiguration, create_pipeline_configuration_from_dict, create_default_pipeline_configuration
+from musequill.v3.pipeline_configuration import create_default_pipeline_configuration
+from musequill.v3.components.orchestration.enhanced_pipeline_config import (
+    EnhancedPipelineOrchestratorConfig,
+    create_enhanced_pipeline_configuration_from_dict
+)
 
 # Import activity logger (save PipelineActivityLogger as a separate module first)
 from musequill.v3.pipeline_activity_logger import PipelineActivityLogger, setup_pipeline_logging
@@ -44,6 +48,7 @@ except ImportError:
         def __getattr__(self, name): return ""
     Fore = Back = Style = MockColor()
 
+load_dotenv(find_dotenv())
 
 class EnhancedPipelineRunner:
     """Enhanced pipeline runner using component registry pattern."""
@@ -72,35 +77,43 @@ class EnhancedPipelineRunner:
                 'total_types': len(component_registry.registered_types)
             })
             
-            # Create pipeline configuration from config
+            # Create pipeline orchestrator configuration
             pipeline_config = self._create_pipeline_configuration()
             
-            # Create orchestrator instance using registry
+            # Create orchestrator instance using registry  
             self.logger.info("🎭 Creating pipeline orchestrator...")
-            # orchestrator_id = component_registry.create_component(
-            #     'pipeline_orchestrator', 
-            #     pipeline_config.orchestrator_config
-            # )
+            
+            # Create component configuration wrapper
+            from musequill.v3.components.base.component_interface import ComponentConfiguration, ComponentType
+            
+            orchestrator_component_config = ComponentConfiguration(
+                component_type=ComponentType.ORCHESTRATOR,
+                component_name="Enhanced Pipeline Orchestrator",
+                version="3.0.0",
+                max_concurrent_executions=1,
+                execution_timeout_seconds=pipeline_config.pipeline_timeout_minutes * 60,
+                specific_config=pipeline_config
+            )
             
             orchestrator_id = component_registry.create_component(
                 'pipeline_orchestrator', 
-                pipeline_config.orchestrator_config
+                orchestrator_component_config
             )
 
             self.orchestrator = component_registry.get_component(orchestrator_id)
             if not self.orchestrator:
                 raise ComponentError(f"Failed to create orchestrator with ID: {orchestrator_id}")
             
-            # Initialize all pipeline components through orchestrator
-            self.logger.info("🏗️ Initializing pipeline components...")
-            init_success = await self.orchestrator._initialize_all_components(pipeline_config)
+            # Initialize the orchestrator using BaseComponent interface
+            self.logger.info("🏗️ Initializing pipeline orchestrator...")
+            init_success = await self.orchestrator.initialize()
             
             if init_success:
                 self.logger.info("✅ Pipeline initialization complete")
                 self.activity_logger.log_activity('pipeline_init_success', 'pipeline_runner', {
                     'orchestrator_id': orchestrator_id,
-                    'pipeline_strategy': pipeline_config.orchestration_strategy,
-                    'components_initialized': len(self.orchestrator.get_active_components())
+                    'pipeline_strategy': pipeline_config.orchestration_strategy.value,
+                    'orchestrator_status': self.orchestrator.state.status.value
                 })
                 return True
             else:
@@ -112,10 +125,9 @@ class EnhancedPipelineRunner:
             self.activity_logger.log_error('pipeline_runner', e, {'stage': 'initialization'})
             return False
     
-    def _create_pipeline_configuration(self) -> PipelineConfiguration:
-        """Create pipeline configuration from main config."""
-        
-        return create_pipeline_configuration_from_dict(self.config)
+    def _create_pipeline_configuration(self) -> EnhancedPipelineOrchestratorConfig:
+        """Create enhanced pipeline orchestrator configuration from main config."""
+        return create_enhanced_pipeline_configuration_from_dict(self.config)
     
     async def execute_pipeline(self, story_config: Dict[str, Any]) -> Dict[str, Any]:
         """Execute the complete pipeline."""
@@ -130,8 +142,22 @@ class EnhancedPipelineRunner:
         })
         
         try:
-            # Execute pipeline through orchestrator
-            results = await self.orchestrator.execute_pipeline(story_config)
+            # Use the enhanced orchestrator's story generation pipeline method
+            if hasattr(self.orchestrator, 'execute_story_generation_pipeline'):
+                # Use enhanced method with research integration
+                results = await self.orchestrator.execute_story_generation_pipeline(
+                    story_config=story_config,
+                    manual_research_queries=story_config.get('manual_research_queries', [])
+                )
+            else:
+                # Fall back to basic pipeline execution (convert story_config to proper input)
+                from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestratorInput
+                orchestrator_input = PipelineOrchestratorInput(
+                    chapter_objectives=[],  # Would need to convert story_config to chapter objectives
+                    story_state=story_config
+                )
+                pipeline_result = await self.orchestrator.process(orchestrator_input)
+                results = pipeline_result.model_dump() if hasattr(pipeline_result, 'model_dump') else pipeline_result
             
             self.logger.info("✅ Pipeline execution completed successfully")
             self.activity_logger.log_activity('pipeline_execution_success', 'pipeline_runner', {
@@ -152,11 +178,16 @@ class EnhancedPipelineRunner:
         
         if self.orchestrator:
             try:
-                await self.orchestrator.cleanup()
-                self.logger.info("✅ Pipeline cleanup completed")
-                self.activity_logger.log_activity('pipeline_cleanup', 'pipeline_runner', {
-                    'cleanup_successful': True
-                })
+                # Use BaseComponent cleanup method
+                cleanup_success = await self.orchestrator.cleanup()
+                if cleanup_success:
+                    self.logger.info("✅ Pipeline cleanup completed")
+                    self.activity_logger.log_activity('pipeline_cleanup', 'pipeline_runner', {
+                        'cleanup_successful': True
+                    })
+                else:
+                    self.logger.warning("⚠️ Pipeline cleanup completed with warnings")
+                    
             except Exception as e:
                 self.logger.error(f"Pipeline cleanup error: {e}")
                 self.activity_logger.log_error('pipeline_runner', e, {'stage': 'cleanup'})
@@ -234,150 +265,93 @@ def get_enhanced_default_configuration() -> Dict[str, Any]:
 def setup_signal_handlers(pipeline_runner: EnhancedPipelineRunner, activity_logger: PipelineActivityLogger):
     """Setup signal handlers for graceful shutdown."""
     
-    def signal_handler(sig, frame):
-        logger = logging.getLogger('main.shutdown')
-        logger.info(f"Received signal {sig}, initiating graceful shutdown...")
-        
-        activity_logger.log_activity('shutdown_signal', 'main', {'signal': sig})
-        
-        async def shutdown():
-            try:
-                await pipeline_runner.cleanup_pipeline()
-                activity_logger.save_final_report()
-                logger.info("Graceful shutdown completed")
-            except Exception as e:
-                logger.error(f"Error during shutdown: {e}")
-            finally:
-                sys.exit(0)
-        
-        # Run shutdown in event loop
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            loop.create_task(shutdown())
-        else:
-            asyncio.run(shutdown())
+    def signal_handler(signum, frame):
+        """Handle shutdown signals gracefully."""
+        logger = logging.getLogger('main.signals')
+        logger.info(f"Received signal {signum}, initiating graceful shutdown...")
+        activity_logger.log_activity('shutdown_signal_received', 'main', {
+            'signal': signum,
+            'timestamp': datetime.now().isoformat()
+        })
+        # Note: Async cleanup will be handled in the main execution loop
     
-    # Register signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
 
 def create_example_story_config() -> Dict[str, Any]:
-    """Create example story configuration optimized for registry pattern."""
-    
+    """Create an example story configuration for testing."""
     return {
-        "title": "The Neural Network",
-        "genre": "Science Fiction Thriller",
-        "target_audience": "Adult",
-        "estimated_length": "80000-100000 words",
-        
-        "protagonist": {
-            "name": "Dr. Sarah Chen",
-            "background": "AI researcher at a leading tech company",
-            "motivation": "Uncover the truth about a mysterious AI breakthrough",
-            "personality_traits": ["analytical", "persistent", "ethical"]
+        'title': 'The Quantum Enigma',
+        'genre': 'science_fiction',
+        'plot_type': 'mystery',
+        'target_length': 'novel',
+        'target_audience': 'adult',
+        'structure': {
+            'estimated_chapters': 12,
+            'act_structure': '3-act'
         },
-        
-        "supporting_characters": [
-            {
-                "name": "Marcus Rodriguez",
-                "role": "Senior Engineer",
-                "relationship_to_protagonist": "Colleague and friend",
-                "motivation": "Support Sarah while protecting company secrets"
+        'characters': {
+            'protagonist': {
+                'name': 'Dr. Sarah Chen',
+                'role': 'quantum physicist',
+                'motivation': 'uncover scientific conspiracy'
             }
-        ],
-        
-        "plot_structure": {
-            "act_1": "Discovery of unusual AI behavior patterns",
-            "act_2": "Investigation reveals deeper conspiracy",
-            "act_3": "Confrontation and resolution",
-            "estimated_chapters": 12,
-            "pacing": "fast-paced with technical elements"
         },
-        
-        "setting": {
-            "time_period": "Near future (2030s)",
-            "primary_location": "Silicon Valley tech campus",
-            "secondary_locations": ["San Francisco", "Remote data centers"],
-            "technology_level": "Advanced AI, quantum computing"
+        'setting': {
+            'time': '2045',
+            'location': 'CERN facility, Geneva'
         },
-        
-        "themes": ["Technology ethics", "Corporate responsibility", "Human vs AI intelligence"],
-        
-        "quality_targets": {
-            "plot_coherence_minimum": 0.80,
-            "literary_quality_minimum": 0.75,
-            "reader_engagement_minimum": 0.85,
-            "market_viability_minimum": 0.70
-        }
+        'themes': ['scientific ethics', 'reality vs simulation', 'trust'],
+        'manual_research_queries': [
+            'quantum physics research trends 2024',
+            'CERN facility recent discoveries',
+            'science fiction thriller market analysis'
+        ]
     }
 
 
 async def main():
-    """Enhanced main pipeline execution function using registry pattern."""
+    """Main entry point for the enhanced MuseQuill pipeline."""
     
-    # Parse command line arguments
-    parser = argparse.ArgumentParser(
-        description="MuseQuill V3 Enhanced Pipeline with Component Registry",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-Examples:
-    python main.py --example
-    python main.py --config config.yaml --story story.json
-    python main.py --config config.yaml --story story.json --log-level DEBUG
-    python main.py --validate-config --config config.yaml
-    python main.py --test-registry  # Test component registry setup
-        """
-    )
-    
-    parser.add_argument('--config', type=Path, help='Pipeline configuration file (.yaml or .json)')
-    parser.add_argument('--story', type=Path, help='Story configuration file (.json)')
-    parser.add_argument('--example', action='store_true', help='Run with example configuration')
-    parser.add_argument('--validate-config', action='store_true', help='Validate configuration and exit')
-    parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
-                       default='INFO', help='Logging level')
-    parser.add_argument('--log-dir', type=Path, default=Path('logs'), help='Directory for log files')
-    parser.add_argument('--output-dir', type=Path, help='Override output directory')
+    # Setup argument parser
+    parser = argparse.ArgumentParser(description='MuseQuill V3 Enhanced Pipeline Runner')
+    parser.add_argument('--config', type=str, help='Path to configuration file')
+    parser.add_argument('--story-config', type=str, help='Path to story configuration file')
+    parser.add_argument('--log-level', type=str, default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'])
+    parser.add_argument('--log-dir', type=str, default='logs', help='Directory for log files')
+    parser.add_argument('--validate-config', action='store_true', help='Only validate configuration and exit')
     
     args = parser.parse_args()
     
-    # Setup enhanced logging
-    activity_logger = setup_enhanced_logging(args.log_level, args.log_dir)
-    logger = logging.getLogger('main')
-    
-    logger.info("=" * 80)
-    logger.info(f"{Fore.CYAN}{Style.BRIGHT}MuseQuill V3 Enhanced Pipeline Starting{Style.RESET_ALL}")
-    logger.info(f"Using Component Registry Pattern")
-    logger.info("=" * 80)
-    
-    activity_logger.log_activity('pipeline_start', 'main', {
-        'args': vars(args),
-        'python_version': sys.version,
-        'working_directory': str(Path.cwd()),
-        'registry_pattern': True
-    })
-        
     try:
-        # Load enhanced configuration
-        if args.example:
-            logger.info("Running with enhanced example configuration")
-            config = get_enhanced_default_configuration()
-            story_config = create_example_story_config()
-        else:
-            config = load_enhanced_configuration(args.config)
-            
-            # Override output directory if specified
-            if args.output_dir:
-                config['output']['base_directory'] = str(args.output_dir)
-            
-            # Load story configuration
-            if args.story and args.story.exists():
-                logger.info(f"Loading story configuration from: {args.story}")
-                with open(args.story, 'r') as f:
+        # Setup logging
+        log_dir = Path(args.log_dir)
+        activity_logger = setup_enhanced_logging(args.log_level, log_dir)
+        logger = logging.getLogger('main')
+        
+        logger.info("🚀 Starting MuseQuill V3 Enhanced Pipeline")
+        activity_logger.log_activity('pipeline_start', 'main', {
+            'version': '3.0.0',
+            'config_path': args.config,
+            'story_config_path': args.story_config,
+            'log_level': args.log_level
+        })
+        
+        # Load configuration
+        config = load_enhanced_configuration(Path(args.config) if args.config else None)
+        
+        # Load story configuration
+        if args.story_config and Path(args.story_config).exists():
+            logger.info(f"Loading story configuration from: {args.story_config}")
+            with open(args.story_config, 'r') as f:
+                if args.story_config.endswith('.yaml') or args.story_config.endswith('.yml'):
+                    story_config = yaml.safe_load(f)
+                else:
                     story_config = json.load(f)
-            else:
-                logger.info("Using example story configuration")
-                story_config = create_example_story_config()
+        else:
+            logger.info("Using example story configuration")
+            story_config = create_example_story_config()
         
         # Validate configuration if requested
         if args.validate_config:

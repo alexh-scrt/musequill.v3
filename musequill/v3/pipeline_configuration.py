@@ -14,7 +14,6 @@ from musequill.v3.components.orchestration.pipeline_orchestrator import (
 )
 from musequill.v3.components.base.component_interface import ComponentConfiguration
 
-
 class ResearchIntegrationMode(str, Enum):
     """Research integration modes for the pipeline."""
     DISABLED = "disabled"
@@ -239,114 +238,108 @@ class EnhancedPipelineSettings(BaseModel):
 
 # Configuration factory functions
 
-def create_pipeline_configuration_from_dict(config_dict: Dict[str, Any]) -> PipelineConfiguration:
+# Add this to the pipeline_configuration.py file or modify the existing function
+
+# Replace the create_pipeline_configuration_from_dict function in pipeline_configuration.py
+
+def create_pipeline_configuration_from_dict(config_dict: Dict[str, Any]) -> PipelineOrchestratorConfig:
     """
-    Create a PipelineConfiguration from a dictionary configuration.
+    Create PipelineOrchestratorConfig from dictionary configuration.
     
     Args:
-        config_dict: Configuration dictionary
+        config_dict: Configuration dictionary from YAML/JSON
         
     Returns:
-        PipelineConfiguration instance
+        PipelineOrchestratorConfig instance
     """
-    from musequill.v3.components.component_registry import create_enhanced_component_configurations
-
-    from musequill.v3.components.base.component_interface import ComponentConfiguration, ComponentType
-    
-    # Get component configurations from registry
-    component_configs = create_enhanced_component_configurations()
-    
-    # Extract orchestrator configuration
-    orchestrator_config = component_configs.get('pipeline_orchestrator')
-    if not orchestrator_config:
-        # Create default orchestrator config
-        from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestratorConfig
+    try:
+        # Extract settings from config dict with defaults
+        pipeline_settings = config_dict.get('pipeline', {})
+        orchestration_settings = config_dict.get('orchestration', {})
+        components_settings = config_dict.get('components', {})
+        pipeline_orchestrator_settings = components_settings.get('pipeline_orchestrator', {})
+        research_settings = config_dict.get('research', {})
+        error_handling_settings = config_dict.get('error_handling', {})
         
-        orchestrator_specific_config = PipelineOrchestratorConfig(
+        # Map orchestration strategy string to enum
+        strategy_str = pipeline_settings.get('orchestration_strategy', 'balanced')
+        if isinstance(strategy_str, str):
+            strategy_mapping = {
+                'balanced': OrchestrationStrategy.BALANCED,
+                'quality_first': OrchestrationStrategy.QUALITY_FIRST,
+                'speed_optimized': OrchestrationStrategy.SPEED_OPTIMIZED,
+                'experimental': OrchestrationStrategy.EXPERIMENTAL
+            }
+            orchestration_strategy = strategy_mapping.get(strategy_str.lower(), OrchestrationStrategy.BALANCED)
+        else:
+            orchestration_strategy = strategy_str
+        
+        # Create PipelineOrchestratorConfig
+        config = PipelineOrchestratorConfig(
+            # Core orchestration settings
+            max_generation_attempts=pipeline_settings.get('max_generation_attempts', 
+                                   pipeline_orchestrator_settings.get('max_generation_attempts', 5)),
+            max_revision_cycles=pipeline_settings.get('max_revision_cycles',
+                              pipeline_orchestrator_settings.get('max_revision_cycles', 3)),
+            orchestration_strategy=orchestration_strategy,
+            
+            # Component behavior settings
+            parallel_variant_evaluation=orchestration_settings.get('enable_parallel_evaluation',
+                                       pipeline_orchestrator_settings.get('parallel_variant_evaluation', True)),
+            
+            # Market intelligence settings
+            enable_market_intelligence_refresh=research_settings.get('enable_research_integration',
+                                              pipeline_orchestrator_settings.get('enable_market_intelligence_refresh', True)),
+            market_refresh_interval_hours=research_settings.get('market_refresh_interval_hours',
+                                         pipeline_orchestrator_settings.get('market_refresh_interval_hours', 24)),
+            
+            # Health and monitoring settings
+            component_health_check_interval=orchestration_settings.get('component_health_check_interval',
+                                           pipeline_orchestrator_settings.get('component_health_check_interval', 300)),
+            
+            # Adaptive orchestration
+            enable_adaptive_orchestration=orchestration_settings.get('enable_adaptive_orchestration',
+                                         pipeline_orchestrator_settings.get('enable_adaptive_orchestration', True)),
+            
+            # Timeout settings
+            pipeline_timeout_minutes=orchestration_settings.get('pipeline_timeout_minutes',
+                                    pipeline_orchestrator_settings.get('pipeline_timeout_minutes', 60)),
+            
+            # Logging settings
+            enable_comprehensive_logging=orchestration_settings.get('enable_comprehensive_logging',
+                                        pipeline_orchestrator_settings.get('enable_comprehensive_logging', True)),
+            
+            # Error handling
+            fallback_on_component_failure=error_handling_settings.get('fallback_strategies',
+                                         pipeline_orchestrator_settings.get('fallback_on_component_failure', True))
+        )
+        
+        return config
+        
+    except Exception as e:
+        # If anything fails, create a minimal valid configuration
+        print(f"Warning: Error creating pipeline orchestrator configuration: {e}")
+        print("Creating minimal default configuration...")
+        
+        return PipelineOrchestratorConfig(
+            max_generation_attempts=5,
+            max_revision_cycles=3,
             orchestration_strategy=OrchestrationStrategy.BALANCED,
-            max_generation_attempts=config_dict.get('pipeline', {}).get('max_generation_attempts', 3),
-            max_revision_cycles=config_dict.get('pipeline', {}).get('max_revision_cycles', 2),
+            parallel_variant_evaluation=True,
+            enable_market_intelligence_refresh=True,
+            market_refresh_interval_hours=24,
+            component_health_check_interval=300,
             enable_adaptive_orchestration=True,
-            pipeline_timeout_minutes=60
+            pipeline_timeout_minutes=60,
+            enable_comprehensive_logging=True,
+            fallback_on_component_failure=True
         )
-        
-        orchestrator_config = ComponentConfiguration(
-            component_type=ComponentType.ORCHESTRATOR,
-            component_name="Enhanced Pipeline Orchestrator",
-            version="3.0.0",
-            max_concurrent_executions=1,
-            execution_timeout_seconds=3600,
-            specific_config=orchestrator_specific_config
-        )
-    
-    # Extract settings from config dict
-    pipeline_settings = config_dict.get('pipeline', {})
-    research_settings = config_dict.get('research', {})
-    performance_settings = config_dict.get('performance', {})
-    quality_settings = config_dict.get('quality', {})
-    
-    return PipelineConfiguration(
-        component_configs=component_configs,
-        orchestrator_config=orchestrator_config,
-        
-        # Pipeline behavior
-        orchestration_strategy=pipeline_settings.get('orchestration_strategy', 'balanced'),
-        max_generation_attempts=pipeline_settings.get('max_generation_attempts', 3),
-        max_revision_cycles=pipeline_settings.get('max_revision_cycles', 2),
-        enable_progressive_quality=pipeline_settings.get('enable_progressive_quality', True),
-        
-        # Research integration
-        enable_research_integration=research_settings.get('enable_research_integration', True),
-        research_triggers=research_settings.get('automatic_triggers', ['market_stale', 'quality_drop']),
-        research_caching=research_settings.get('enable_caching', True),
-        
-        # Performance
-        max_concurrent_components=performance_settings.get('max_concurrent_components', 3),
-        component_timeout_seconds=performance_settings.get('component_timeout_seconds', 300),
-        enable_checkpoints=performance_settings.get('enable_checkpoints', True),
-        
-        # Quality
-        quality_threshold=quality_settings.get('minimum_threshold', 0.75),
-        enable_quality_gates=quality_settings.get('enable_gates', True),
-        
-        # Execution metadata
-        execution_metadata={
-            'config_source': 'dictionary',
-            'created_at': config_dict.get('timestamp', 'unknown')
-        }
-    )
 
 
-def create_default_pipeline_configuration() -> PipelineConfiguration:
-    """
-    Create a default pipeline configuration with sensible defaults.
+def create_default_pipeline_configuration() -> PipelineOrchestratorConfig:
+    """Create a default pipeline orchestrator configuration for testing/fallback."""
     
-    Returns:
-        Default PipelineConfiguration instance
-    """
-    return create_pipeline_configuration_from_dict({
-        'pipeline': {
-            'orchestration_strategy': 'balanced',
-            'max_generation_attempts': 3,
-            'max_revision_cycles': 2,
-            'enable_progressive_quality': True
-        },
-        'research': {
-            'enable_research_integration': True,
-            'automatic_triggers': ['market_stale', 'quality_drop'],
-            'enable_caching': True
-        },
-        'performance': {
-            'max_concurrent_components': 3,
-            'component_timeout_seconds': 300,
-            'enable_checkpoints': True
-        },
-        'quality': {
-            'minimum_threshold': 0.75,
-            'enable_gates': True
-        },
-        'timestamp': 'default_configuration'
-    })
+    return create_pipeline_configuration_from_dict({})
 
 
 # Export main classes and functions

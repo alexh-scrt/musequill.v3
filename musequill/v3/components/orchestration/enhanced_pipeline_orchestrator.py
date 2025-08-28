@@ -14,7 +14,11 @@ from dataclasses import dataclass
 from enum import Enum
 
 from musequill.v3.components.base.component_interface import BaseComponent, ComponentConfiguration, ComponentType
-from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestrator
+from musequill.v3.components.orchestration.pipeline_orchestrator import (
+    PipelineOrchestrator, 
+    PipelineOrchestratorConfig,
+)
+from musequill.v3.components.orchestration.enhanced_pipeline_config import EnhancedPipelineOrchestratorConfig
 
 # Import the enhanced researcher
 from .pipeline_researcher import (
@@ -63,20 +67,44 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
     Automatically triggers research based on story state and component needs.
     """
     
-    def __init__(self, config: Dict[str, Any]):
+    def __init__(self, config: ComponentConfiguration[EnhancedPipelineOrchestratorConfig]):
         super().__init__(config)
         
-        # Initialize researcher
-        researcher_config = PipelineResearcherConfig(**config.get('researcher', {}))
+        # Access the enhanced config from the ComponentConfiguration
+        enhanced_config = config.specific_config
+        
+        # Initialize researcher with settings from enhanced config
+        researcher_config = PipelineResearcherConfig(
+            tavily_api_key=enhanced_config.researcher_tavily_api_key or '',
+            max_concurrent_requests=enhanced_config.researcher_max_concurrent_requests,
+            enable_caching=enhanced_config.researcher_enable_caching,
+            cache_ttl_hours=enhanced_config.researcher_cache_ttl_hours,
+            request_timeout_seconds=enhanced_config.researcher_request_timeout_seconds,
+            max_results_per_query=enhanced_config.researcher_max_results_per_query,
+            
+            # Auto-trigger conditions from enhanced config
+            auto_trigger_conditions={
+                'market_data_age_hours': enhanced_config.market_refresh_interval_hours,
+                'plot_inconsistency_threshold': enhanced_config.plot_inconsistency_threshold,
+                'character_development_gaps': enhanced_config.character_development_gaps_trigger
+            }
+        )
+        
         self.researcher = PipelineResearcher(researcher_config)
         
         # Research management
         self.research_rules: List[ResearchRule] = []
         self.last_research_times: Dict[str, datetime] = {}
-        self.research_enabled = config.get('enable_auto_research', True)
+        self.research_enabled = enhanced_config.enable_auto_research
         
-        # LLM Discriminator integration
+        # LLM Discriminator integration settings
         self._llm_discriminator = None
+        self.llm_discriminator_enabled = enhanced_config.enable_llm_discriminator
+        self.llm_discriminator_weight = enhanced_config.llm_discriminator_weight
+        self.llm_discriminator_config = {
+            'model': enhanced_config.llm_discriminator_model,
+            'temperature': enhanced_config.llm_discriminator_temperature
+        }
         
         # Setup default research rules
         self._setup_default_research_rules()
@@ -87,7 +115,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         await self.researcher.initialize()
         
         # Initialize LLM Discriminator
-        if self.config.get('enable_llm_discriminator', True):
+        if self.config.specific_config.enable_llm_discriminator:
             await self._initialize_llm_discriminator()
         
         # Inject researcher into components
@@ -121,24 +149,23 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
     
     def _create_llm_discriminator_config(self) -> LLMDiscriminatorConfig:
         """Create LLM discriminator configuration from pipeline config."""
-        llm_settings = self.config.get('llm_discriminator', {})
-        
+        llm_settings = self.config.specific_config
         return LLMDiscriminatorConfig(
-            llm_model_name=llm_settings.get('model', "llama3.3:70b"),
-            analysis_temperature=llm_settings.get('temperature', 0.2),
-            max_analysis_tokens=llm_settings.get('max_tokens', 2000),
-            critique_depth=llm_settings.get('depth', "comprehensive"),
-            focus_areas=llm_settings.get('focus_areas', [
+            llm_model_name=llm_settings.llm_discriminator_model,
+            analysis_temperature=llm_settings.llm_discriminator_temperature,
+            max_analysis_tokens=llm_settings.llm_discriminator_max_tokens,
+            critique_depth=llm_settings.llm_discriminator_depth,
+            focus_areas=llm_settings.llm_discriminator_focus_areas if llm_settings.llm_discriminator_focus_areas is not None else [
                 CritiqueDimension.PLOT_COHERENCE.value,
                 CritiqueDimension.CHARACTER_DEVELOPMENT.value,
                 CritiqueDimension.PROSE_QUALITY.value,
                 CritiqueDimension.PACING.value,
                 CritiqueDimension.EMOTIONAL_RESONANCE.value,
                 CritiqueDimension.MARKET_APPEAL.value
-            ]),
-            scoring_strictness=llm_settings.get('strictness', 0.75),
-            include_suggestions=llm_settings.get('include_suggestions', True),
-            max_analysis_time_seconds=llm_settings.get('max_time', 90)
+            ],
+            scoring_strictness=llm_settings.llm_discriminator_strictness,
+            include_suggestions=llm_settings.llm_discriminator_include_suggestions,
+            max_analysis_time_seconds=llm_settings.llm_discriminator_max_time
         )
     
     async def shutdown(self):

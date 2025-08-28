@@ -1,140 +1,89 @@
-# ===== config.yaml =====
-# MuseQuill V3 Pipeline Configuration
-# Complete configuration for the adversarial book generation system
+# MuseQuill V3 Pipeline Configuration - EnhancedPipelineOrchestratorConfig Compatible
+# Supports environment variable resolution using ${VAR_NAME} or ${VAR_NAME:default_value} syntax
 
-# Core pipeline settings
+# Pipeline behavior settings 
 pipeline:
+  orchestration_strategy: "balanced"  # balanced, quality_first, speed_optimized, experimental
   max_generation_attempts: 5
   max_revision_cycles: 3
-  orchestration_strategy: "balanced"  # quality_first, speed_optimized, balanced, experimental
-  parallel_variant_evaluation: true
-  enable_market_intelligence_refresh: true
+
+# Research settings  
+research:
+  enable_research_integration: true
   market_refresh_interval_hours: 24
-  component_health_check_interval: 300
-  enable_adaptive_orchestration: true
-  pipeline_timeout_minutes: 60
-  enable_comprehensive_logging: true
-  fallback_on_component_failure: true
+  plot_inconsistency_threshold: 0.7
+  character_development_gaps: true
+  researcher:
+    # Environment variable with no default - will warn if not set
+    tavily_api_key: "${TAVILY_API_KEY}"
+    # Environment variable with default value
+    max_concurrent_requests: "${RESEARCHER_MAX_CONCURRENT:3}"
+    enable_caching: "${RESEARCHER_ENABLE_CACHING:true}"
+    cache_ttl_hours: "${RESEARCHER_CACHE_TTL:12}"
+    request_timeout_seconds: "${RESEARCHER_TIMEOUT:30}"
+    max_results_per_query: "${RESEARCHER_MAX_RESULTS:10}"
 
-# Research integration settings
-researcher:
-  tavily_api_key: "${TAVILY_API_KEY}"  # Set as environment variable
-  max_concurrent_requests: 3
-  enable_caching: true
-  cache_ttl_hours: 12
-  quality_threshold: 0.7
-  
-  # Automatic research trigger conditions
-  auto_trigger_conditions:
-    market_data_age_hours: 6
-    plot_inconsistency_threshold: 0.8
-    character_development_gaps: true
-    trend_analysis_frequency: "daily"
-
-# Component-specific configurations
-components:
-  chapter_generator:
-    model_name: "llama3.3:70b"
-    temperature: 0.8
-    max_tokens: 4000
-    creativity_boost: true
-    style_consistency_weight: 0.7
-
+# Quality settings with LLM discriminator
+quality:
+  enable_llm_discriminator: "${ENABLE_LLM_DISCRIMINATOR:true}"
   llm_discriminator:
-    model_name: "llama3.3:70b"
-    temperature: 0.5
-    max_tokens: 1000
-    creativity_boost: false
-    style_consistency_weight: 0.8
+    weight: "${LLM_DISCRIMINATOR_WEIGHT:0.6}"
+    model: "${LLM_MODEL:llama3.3:70b}"
+    temperature: "${LLM_TEMPERATURE:0.2}"
 
-  plot_coherence_critic:
-    strictness_level: "moderate"  # strict, moderate, lenient
-    continuity_weight: 0.8
-    logic_consistency_weight: 0.9
-    character_consistency_weight: 0.8
-    
-  literary_quality_critic:
-    style_analysis_depth: "comprehensive"  # basic, moderate, comprehensive
-    originality_threshold: 0.6
-    prose_quality_threshold: 0.7
-    voice_authenticity_weight: 0.8
-    
-  reader_engagement_critic:
-    target_audience: "general_adult"
-    engagement_threshold: 0.75
-    emotional_impact_weight: 0.8
-    pacing_consistency_weight: 0.7
-    
-  quality_controller:
-    quality_threshold: 0.75
-    enable_detailed_feedback: true
-    weighted_scoring: true
-    revision_suggestion_detail: "comprehensive"
-    
-  market_intelligence_engine:
-    update_frequency_hours: 24
-    search_depth: "advanced"  # basic, advanced
-    max_search_results: 15
-    enable_competitive_analysis: true
-    trend_confidence_threshold: 0.6
-    genres_to_track: ["romance", "thriller", "fantasy", "literary", "mystery", "sci-fi"]
+# Orchestration settings
+orchestration:
+  enable_parallel_evaluation: true
+  component_health_check_interval: "${HEALTH_CHECK_INTERVAL:300}"
+  enable_adaptive_orchestration: true
+  pipeline_timeout_minutes: "${PIPELINE_TIMEOUT:60}"
+  enable_comprehensive_logging: "${ENABLE_LOGGING:true}"
 
-# Output configuration
-output:
-  base_directory: "./output"
-  save_intermediate_results: true
-  export_formats: ["json", "text", "epub"]
-  chapter_backup_frequency: 5  # Save backup every N chapters
-  
-  # File naming patterns
-  naming:
-    story_directory: "{title}_{timestamp}"
-    chapter_files: "chapter_{number:02d}_{title_slug}.txt"
-    backup_files: "backup_{timestamp}.json"
+# Error handling
+error_handling:
+  fallback_strategies: "${ENABLE_FALLBACK:true}"
 
-# Logging configuration
+discriminator:
+  llm_discriminator:
+    enable_llm_discriminator: "${ENABLE_LLM_DISCRIMINATOR:true}"
+    weight: "${LLM_DISCRIMINATOR_WEIGHT:0.6}"
+    model: "${LLM_MODEL:llama3.3:70b}"
+    temperature: "${LLM_TEMPERATURE:0.2}"
+    depth: "comprehensive"
+    strictness: 0.75,
+    include_suggestions: true,
+    max_time: 90
+
+# Components settings (specific to pipeline_orchestrator)
+components:
+  pipeline_orchestrator:
+    max_generation_attempts: 5
+    max_revision_cycles: 3
+    parallel_variant_evaluation: true
+    enable_market_intelligence_refresh: true
+    market_refresh_interval_hours: 24
+    component_health_check_interval: "${HEALTH_CHECK_INTERVAL:300}"
+    enable_adaptive_orchestration: true
+    pipeline_timeout_minutes: "${PIPELINE_TIMEOUT:60}"
+    enable_comprehensive_logging: "${ENABLE_LOGGING:true}"
+    fallback_on_component_failure: "${ENABLE_FALLBACK:true}"
+
+# External services
+external_services:
+  ollama:
+    base_url: "${OLLAMA_BASE_URL:http://localhost:11434}"
+    timeout_seconds: "${OLLAMA_TIMEOUT:300}"
+  tavily:
+    api_key: "${TAVILY_API_KEY}"
+    timeout_seconds: "${TAVILY_TIMEOUT:30}"
+
+# Logging
 logging:
-  level: "INFO"  # DEBUG, INFO, WARNING, ERROR
-  log_directory: "./logs"
-  enable_activity_tracking: true
-  enable_performance_metrics: true
-  max_log_file_size_mb: 100
-  log_rotation_count: 5
-  
-  # Specific logger levels
-  loggers:
-    "pipeline.orchestrator": "INFO"
-    "pipeline.generator": "INFO"
-    "pipeline.critic": "INFO"
-    "pipeline.researcher": "DEBUG"
-    "pipeline.quality": "INFO"
-    "pipeline.activity": "INFO"
+  level: "${LOG_LEVEL:INFO}"
+  enable_detailed_logging: "${ENABLE_DETAILED_LOGGING:true}"
+  log_directory: "${LOG_DIRECTORY:./logs}"
 
-# Performance and resource settings
-performance:
-  max_concurrent_chapters: 2
-  memory_limit_gb: 8
-  enable_gpu_acceleration: false
-  thread_pool_size: 4
-  
-  # Caching settings
-  cache:
-    enable_component_caching: true
-    enable_research_caching: true
-    enable_market_data_caching: true
-    cache_cleanup_interval_hours: 24
-    max_cache_size_gb: 2
-
-# Development and debugging
-development:
-  enable_debug_mode: false
-  save_debug_artifacts: false
-  enable_component_profiling: false
-  mock_external_apis: false  # For testing without API keys
-  
-  # Testing overrides
-  testing:
-    mock_tavily_responses: false
-    use_dummy_models: false
-    fast_mode: false  # Skip some quality checks for speed
-
+# Output
+output:
+  base_directory: "${OUTPUT_DIRECTORY:./output}"
+  enable_versioning: "${ENABLE_VERSIONING:true}"

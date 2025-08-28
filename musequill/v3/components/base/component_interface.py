@@ -411,6 +411,16 @@ class ComponentRegistry(BaseModel):
     def register_component_type(self, component_type: str, component_class: type) -> None:
         """Register a component class type."""
         self.registered_types[component_type] = component_class
+
+    def create_master_component(self, component_type:str, config: ComponentConfiguration) -> str:
+        if component_type not in self.registered_types:
+            raise ComponentError(f"Component type '{component_type}' not registered")
+        
+        component_class = self.registered_types[component_type]
+        component = component_class(config)
+        
+        self.active_components[config.component_id] = component
+        return config.component_id
     
     def create_component(self, component_type: str, config: ComponentConfiguration) -> str:
         """
