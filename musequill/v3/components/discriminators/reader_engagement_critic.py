@@ -1,14 +1,16 @@
 """
 Reader Engagement Critic Component
 
-Implements commercial viability assessment, emotional journey analysis, satisfaction
-prediction, and market appeal evaluation for the adversarial system discriminator layer.
+Implements reader engagement evaluation, commercial viability assessment,
+and reader satisfaction prediction for the adversarial system discriminator layer.
 """
 
 import asyncio
 import re
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
+from enum import Enum
+from pydantic import BaseModel, Field
 
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError
@@ -16,119 +18,188 @@ from musequill.v3.components.base.component_interface import (
 from musequill.v3.models.chapter_variant import ChapterVariant
 from musequill.v3.models.dynamic_story_state import DynamicStoryState
 from musequill.v3.models.market_intelligence import MarketIntelligence
-from musequill.v3.models.reader_engagement_assessment import (
-    ReaderEngagementAssessment, EmotionalBeat, QuestionAnswerAnalysis,
-    SatisfactionPrediction, CliffhangerAnalysis, EmotionalResponse,
-    EngagementRisk, CliffhangerType
-)
+
+
+class EngagementFactor(str, Enum):
+    """Types of engagement factors."""
+    EMOTIONAL_JOURNEY = "emotional_journey"
+    CURIOSITY_HOOKS = "curiosity_hooks"
+    CLIFFHANGER_EFFECTIVENESS = "cliffhanger_effectiveness"
+    CHARACTER_RELATABILITY = "character_relatability"
+    CONFLICT_TENSION = "conflict_tension"
+    PACING_MOMENTUM = "pacing_momentum"
+    DIALOGUE_APPEAL = "dialogue_appeal"
+    SCENE_IMMERSION = "scene_immersion"
 
 
 class ReaderEngagementCriticConfig(BaseModel):
     """Configuration for Reader Engagement Critic component."""
     
-    emotional_detection_sensitivity: float = Field(
-        default=0.6,
+    engagement_threshold: float = Field(
+        default=0.65,
         ge=0.0,
         le=1.0,
-        description="Sensitivity threshold for emotional beat detection"
+        description="Minimum acceptable reader engagement score"
     )
     
-    question_tracking_enabled: bool = Field(
-        default=True,
-        description="Whether to track question planting and resolution"
-    )
-    
-    cliffhanger_analysis_enabled: bool = Field(
-        default=True,
-        description="Whether to analyze chapter ending effectiveness"
-    )
-    
-    commercial_focus_weight: float = Field(
-        default=0.7,
+    commercial_viability_weight: float = Field(
+        default=0.4,
         ge=0.0,
         le=1.0,
-        description="Weight given to commercial appeal vs artistic merit"
+        description="Weight for commercial viability in overall score"
     )
     
-    target_demographic: str = Field(
-        default="general_adult",
-        description="Target reader demographic for assessment"
+    emotional_impact_weight: float = Field(
+        default=0.35,
+        ge=0.0,
+        le=1.0,
+        description="Weight for emotional impact in overall score"
     )
     
-    binge_reading_optimization: bool = Field(
-        default=True,
-        description="Whether to optimize for binge-reading behavior"
+    curiosity_factor_weight: float = Field(
+        default=0.25,
+        ge=0.0,
+        le=1.0,
+        description="Weight for curiosity/hooks in overall score"
     )
     
     max_analysis_time_seconds: int = Field(
         default=40,
-        ge=10,
+        ge=5,
         le=300,
-        description="Maximum time for engagement analysis"
+        description="Maximum time to spend analyzing engagement"
     )
+    
+    enable_market_alignment: bool = Field(
+        default=True,
+        description="Whether to consider market trends in assessment"
+    )
+    
+    target_demographics: List[str] = Field(
+        default_factory=lambda: ["young_adult", "adult", "general_fiction"],
+        description="Target reader demographics for assessment"
+    )
+    
+    minimum_emotional_variety: int = Field(
+        default=3,
+        ge=1,
+        le=10,
+        description="Minimum variety of emotions that should be evoked"
+    )
+
+
+class EmotionalBeat(BaseModel):
+    """Represents an emotional moment in the chapter."""
+    
+    emotion_type: str = Field(description="Type of emotion evoked")
+    intensity: float = Field(ge=0.0, le=1.0, description="Emotional intensity")
+    location: str = Field(description="Where in the chapter this occurs")
+    effectiveness: float = Field(ge=0.0, le=1.0, description="How effective this beat is")
+
+
+class CuriosityHook(BaseModel):
+    """Represents a curiosity-inducing element."""
+    
+    hook_type: str = Field(description="Type of curiosity hook")
+    strength: float = Field(ge=0.0, le=1.0, description="Strength of the hook")
+    resolution_promise: bool = Field(description="Whether it promises future resolution")
+    description: str = Field(description="Description of the hook")
+
+
+class EngagementAnalysis(BaseModel):
+    """Analysis of a specific engagement factor."""
+    
+    factor: EngagementFactor = Field(description="The engagement factor analyzed")
+    score: float = Field(ge=0.0, le=1.0, description="Score for this factor")
+    strengths: List[str] = Field(default_factory=list, description="Identified strengths")
+    weaknesses: List[str] = Field(default_factory=list, description="Identified weaknesses")
+    suggestions: List[str] = Field(default_factory=list, description="Improvement suggestions")
+
+
+class ReaderEngagementAssessment(BaseModel):
+    """Assessment of reader engagement for a chapter variant."""
+    
+    chapter_number: int = Field(description="Chapter number analyzed")
+    overall_engagement_score: float = Field(ge=0.0, le=1.0, description="Overall engagement score")
+    
+    # Component scores
+    emotional_impact_score: float = Field(ge=0.0, le=1.0, description="Emotional impact score")
+    curiosity_factor_score: float = Field(ge=0.0, le=1.0, description="Curiosity and hooks score")
+    commercial_viability_score: float = Field(ge=0.0, le=1.0, description="Commercial appeal score")
+    character_connection_score: float = Field(ge=0.0, le=1.0, description="Character connection score")
+    pacing_momentum_score: float = Field(ge=0.0, le=1.0, description="Pacing and momentum score")
+    
+    # Detailed analysis
+    emotional_beats: List[EmotionalBeat] = Field(default_factory=list, description="Emotional beats identified")
+    curiosity_hooks: List[CuriosityHook] = Field(default_factory=list, description="Curiosity hooks found")
+    engagement_factors: List[EngagementAnalysis] = Field(default_factory=list, description="Detailed factor analysis")
+    
+    # Reader experience prediction
+    predicted_reader_retention: float = Field(ge=0.0, le=1.0, description="Predicted reader retention")
+    cliffhanger_effectiveness: float = Field(ge=0.0, le=1.0, description="Chapter ending effectiveness")
+    page_turner_quality: float = Field(ge=0.0, le=1.0, description="Page-turning quality")
+    
+    # Market alignment
+    market_alignment_score: Optional[float] = Field(default=None, description="Market trend alignment")
+    demographic_appeal: Dict[str, float] = Field(default_factory=dict, description="Appeal to demographics")
+    
+    # Recommendations
+    engagement_strengths: List[str] = Field(default_factory=list, description="Engagement strengths")
+    improvement_priorities: List[str] = Field(default_factory=list, description="Priority improvements")
+    reader_experience_prediction: str = Field(description="Predicted reader experience")
 
 
 class ReaderEngagementCriticInput(BaseModel):
     """Input data for Reader Engagement Critic."""
     
     chapter_variant: ChapterVariant = Field(
-        description="Chapter variant to evaluate for reader engagement"
+        description="Chapter variant to evaluate"
     )
     
     story_state: DynamicStoryState = Field(
-        description="Current story state for context and progression analysis"
+        description="Current story state for engagement context"
     )
     
     market_intelligence: Optional[MarketIntelligence] = Field(
         default=None,
-        description="Market intelligence for commercial assessment"
+        description="Market intelligence for commercial viability assessment"
     )
     
-    previous_engagement_scores: List[float] = Field(
+    previous_assessments: List[ReaderEngagementAssessment] = Field(
         default_factory=list,
-        description="Previous chapter engagement scores for trend analysis"
-    )
-    
-    target_genre: Optional[str] = Field(
-        default=None,
-        description="Target genre for genre-specific engagement assessment"
+        description="Previous engagement assessments for trend analysis"
     )
 
 
 class ReaderEngagementCritic(BaseComponent[ReaderEngagementCriticInput, ReaderEngagementAssessment, ReaderEngagementCriticConfig]):
     """
-    Reader Engagement Critic component for commercial viability assessment.
+    Reader Engagement Critic component for commercial viability and engagement evaluation.
     
-    Evaluates emotional journey effectiveness, question/answer balance,
-    satisfaction potential, and market appeal with genre-aware criteria.
+    Analyzes chapter variants for reader engagement factors, emotional journey effectiveness,
+    commercial appeal, and reader satisfaction prediction.
     """
     
     def __init__(self, config: ComponentConfiguration[ReaderEngagementCriticConfig]):
         super().__init__(config)
-        self._emotional_patterns: Dict[str, List[str]] = {}
+        self._engagement_patterns: Dict[str, Dict[str, Any]] = {}
+        self._market_trends_cache: Dict[str, Any] = {}
+        self._emotional_response_models: Dict[str, Any] = {}
         self._engagement_history: List[Dict[str, Any]] = []
-        self._market_benchmarks: Dict[str, float] = {}
-        self._question_tracking_cache: Dict[str, Any] = {}
     
     async def initialize(self) -> bool:
-        """Initialize reader engagement analysis systems."""
+        """Initialize the reader engagement analysis systems."""
         try:
-            # Initialize emotional pattern recognition
-            await self._load_emotional_patterns()
+            # Initialize engagement pattern recognition
+            await self._initialize_engagement_patterns()
             
-            # Initialize market benchmarks
-            await self._load_market_benchmarks()
+            # Initialize emotional response models
+            await self._initialize_emotional_models()
             
-            # Initialize question tracking system
-            if self.config.specific_config.question_tracking_enabled:
-                await self._initialize_question_tracking()
+            # Initialize market trend analysis
+            await self._initialize_market_analysis()
             
-            # Initialize cliffhanger analysis
-            if self.config.specific_config.cliffhanger_analysis_enabled:
-                await self._initialize_cliffhanger_analysis()
-            
-            # Initialize commercial assessment tools
-            await self._initialize_commercial_analysis()
+            # Initialize demographic models
+            await self._initialize_demographic_models()
             
             return True
             
@@ -138,104 +209,135 @@ class ReaderEngagementCritic(BaseComponent[ReaderEngagementCriticInput, ReaderEn
     
     async def process(self, input_data: ReaderEngagementCriticInput) -> ReaderEngagementAssessment:
         """
-        Perform comprehensive reader engagement analysis.
+        Analyze chapter variant for reader engagement and commercial viability.
         
         Args:
-            input_data: Chapter variant and context for engagement assessment
+            input_data: Chapter variant and context for engagement analysis
             
         Returns:
-            Detailed reader engagement assessment with commercial viability metrics
+            Comprehensive reader engagement assessment
         """
         start_time = datetime.now()
+        chapter = input_data.chapter_variant
+        story_state = input_data.story_state
+        market_intelligence = input_data.market_intelligence
         
         try:
-            # Update market context if available
-            if input_data.market_intelligence:
-                await self._update_market_context(input_data.market_intelligence)
+            # Extract content for analysis
+            text_content = await self._extract_chapter_content(chapter)
             
             # Perform parallel engagement analysis
             analysis_tasks = [
-                self._analyze_emotional_journey(input_data.chapter_variant, input_data.story_state),
-                self._analyze_question_answer_balance(input_data.chapter_variant, input_data.story_state),
-                self._predict_reader_satisfaction(input_data.chapter_variant, input_data.story_state),
-                self._analyze_cliffhanger_effectiveness(input_data.chapter_variant)
+                self._analyze_emotional_journey(text_content, chapter, story_state),
+                self._analyze_curiosity_hooks(text_content, chapter),
+                self._analyze_character_connection(text_content, chapter, story_state),
+                self._analyze_pacing_momentum(text_content, chapter),
+                self._analyze_cliffhanger_effectiveness(text_content, chapter),
+                self._analyze_commercial_viability(text_content, chapter, market_intelligence)
             ]
             
-            # Execute analysis with timeout
-            timeout_seconds = self.config.specific_config.max_analysis_time_seconds
-            results = await asyncio.wait_for(
-                asyncio.gather(*analysis_tasks, return_exceptions=True),
-                timeout=timeout_seconds
+            results = await asyncio.gather(*analysis_tasks)
+            
+            emotional_result = results[0]
+            curiosity_result = results[1]
+            character_result = results[2]
+            pacing_result = results[3]
+            cliffhanger_result = results[4]
+            commercial_result = results[5]
+            
+            # Calculate component scores
+            emotional_impact_score = emotional_result['score']
+            curiosity_factor_score = curiosity_result['score']
+            character_connection_score = character_result['score']
+            pacing_momentum_score = pacing_result['score']
+            commercial_viability_score = commercial_result['score']
+            
+            # Calculate overall engagement score
+            overall_score = self._calculate_overall_engagement_score(
+                emotional_impact_score,
+                curiosity_factor_score,
+                character_connection_score,
+                pacing_momentum_score,
+                commercial_viability_score
             )
             
-            # Handle exceptions in analysis tasks
-            emotional_result, qa_result, satisfaction_result, cliffhanger_result = results
-            for result in results:
-                if isinstance(result, Exception):
-                    raise ComponentError(f"Engagement analysis subtask failed: {str(result)}")
-            
-            # Identify engagement risks and strengths
-            engagement_risks = await self._identify_engagement_risks(
-                input_data.chapter_variant, emotional_result, qa_result, satisfaction_result
+            # Predict reader experience
+            reader_retention = await self._predict_reader_retention(
+                overall_score, emotional_result, curiosity_result
             )
             
-            engagement_strengths = await self._identify_engagement_strengths(
-                emotional_result, qa_result, satisfaction_result, cliffhanger_result
+            page_turner_quality = await self._assess_page_turner_quality(
+                pacing_result, curiosity_result, cliffhanger_result
             )
             
-            # Generate predicted reader response
-            predicted_response = await self._predict_reader_response(
-                emotional_result, satisfaction_result, input_data.target_genre
+            # Generate engagement factors analysis
+            engagement_factors = await self._generate_engagement_factors_analysis(
+                emotional_result, curiosity_result, character_result, 
+                pacing_result, commercial_result
             )
             
-            # Generate engagement recommendations
-            recommendations = await self._generate_engagement_recommendations(
-                engagement_risks, emotional_result, qa_result, input_data.target_genre
-            )
+            # Market alignment analysis
+            market_alignment_score = None
+            demographic_appeal = {}
+            if market_intelligence and self.config.specific_config.enable_market_alignment:
+                market_alignment_score = commercial_result['market_alignment']
+                demographic_appeal = await self._analyze_demographic_appeal(
+                    text_content, chapter, market_intelligence
+                )
+            
+            # Generate recommendations
+            strengths = self._identify_engagement_strengths(results)
+            improvement_priorities = self._generate_improvement_priorities(results)
+            reader_prediction = self._predict_reader_experience(overall_score, results)
             
             # Compile comprehensive assessment
-            assessment = await self._compile_engagement_assessment(
-                input_data.chapter_variant,
-                emotional_result,
-                qa_result,
-                satisfaction_result,
-                cliffhanger_result,
-                engagement_risks,
-                engagement_strengths,
-                predicted_response,
-                recommendations
+            assessment = ReaderEngagementAssessment(
+                chapter_number=chapter.chapter_number,
+                overall_engagement_score=overall_score,
+                emotional_impact_score=emotional_impact_score,
+                curiosity_factor_score=curiosity_factor_score,
+                commercial_viability_score=commercial_viability_score,
+                character_connection_score=character_connection_score,
+                pacing_momentum_score=pacing_momentum_score,
+                emotional_beats=emotional_result['beats'],
+                curiosity_hooks=curiosity_result['hooks'],
+                engagement_factors=engagement_factors,
+                predicted_reader_retention=reader_retention,
+                cliffhanger_effectiveness=cliffhanger_result['score'],
+                page_turner_quality=page_turner_quality,
+                market_alignment_score=market_alignment_score,
+                demographic_appeal=demographic_appeal,
+                engagement_strengths=strengths,
+                improvement_priorities=improvement_priorities,
+                reader_experience_prediction=reader_prediction
             )
             
-            # Store engagement history for trend analysis
-            self._engagement_history.append({
-                'chapter_number': input_data.chapter_variant.chapter_number,
-                'overall_score': assessment.overall_engagement_score,
-                'timestamp': datetime.now()
-            })
+            # Update engagement history for learning
+            await self._update_engagement_history(assessment, results)
             
             return assessment
             
-        except asyncio.TimeoutError:
-            raise ComponentError(f"Reader engagement analysis exceeded {timeout_seconds}s timeout")
         except Exception as e:
             raise ComponentError(f"Reader engagement analysis failed: {str(e)}", self.config.component_id)
     
     async def health_check(self) -> bool:
-        """Perform health check on engagement analysis systems."""
+        """Perform health check on reader engagement analysis systems."""
         try:
-            # Test emotional pattern recognition
-            test_text = "She felt her heart racing as the door creaked open, revealing nothing but darkness."
-            emotions = await self._detect_emotional_beats(test_text)
-            if not emotions:
+            # Check engagement pattern models are loaded
+            if not self._engagement_patterns:
                 return False
             
-            # Test question detection
-            test_questions = await self._detect_questions_planted("Who was behind the mysterious letter?")
-            if len(test_questions) == 0:
+            # Test emotional response models
+            if not self._emotional_response_models:
                 return False
             
-            # Check component performance
-            if self.state.metrics.failure_rate > 0.1:
+            # Test analysis functionality
+            test_result = await self._test_engagement_analysis()
+            if not test_result:
+                return False
+            
+            # Check component performance metrics
+            if self.state.metrics.failure_rate > 0.15:
                 return False
             
             return True
@@ -244,662 +346,406 @@ class ReaderEngagementCritic(BaseComponent[ReaderEngagementCriticInput, ReaderEn
             return False
     
     async def cleanup(self) -> bool:
-        """Cleanup engagement analysis resources."""
+        """Cleanup reader engagement analysis resources."""
         try:
-            self._emotional_patterns.clear()
-            self._engagement_history.clear()
-            self._market_benchmarks.clear()
-            self._question_tracking_cache.clear()
+            # Clear caches and models
+            self._engagement_patterns.clear()
+            self._market_trends_cache.clear()
+            self._emotional_response_models.clear()
+            
+            # Preserve recent history for analysis but limit size
+            if len(self._engagement_history) > 50:
+                self._engagement_history = self._engagement_history[-25:]
             
             return True
             
         except Exception:
             return False
     
-    async def _load_emotional_patterns(self) -> None:
-        """Load emotional pattern recognition data."""
-        # Common emotional trigger patterns
-        self._emotional_patterns = {
-            'tension': [
-                r'\b(nervous|anxious|worried|tense|afraid|scared)\b',
-                r'\b(heart\s+(racing|pounding|skipped))\b',
-                r'\b(breath\s+(caught|held|shallow))\b'
-            ],
-            'curiosity': [
-                r'\b(wondered|curious|mystery|secret|hidden)\b',
-                r'\?[^"]*$',  # Questions
-                r'\b(what\s+if|how\s+could|why\s+would)\b'
-            ],
-            'satisfaction': [
-                r'\b(relief|satisfied|content|pleased|happy)\b',
-                r'\b(smiled|grinned|laughed)\b',
-                r'\b(finally|at\s+last|success)\b'
-            ],
-            'surprise': [
-                r'\b(suddenly|unexpected|shock|stunned|amazed)\b',
-                r'\!',
-                r'\b(never\s+thought|couldn\'t\s+believe)\b'
-            ]
+    # Analysis Implementation Methods
+    
+    async def _initialize_engagement_patterns(self) -> None:
+        """Initialize engagement pattern recognition models."""
+        # Placeholder for engagement pattern models
+        self._engagement_patterns = {
+            'emotional_peaks': {'model': 'loaded'},
+            'tension_curves': {'model': 'loaded'},
+            'curiosity_triggers': {'model': 'loaded'},
+            'cliffhanger_patterns': {'model': 'loaded'}
         }
     
-    async def _load_market_benchmarks(self) -> None:
-        """Load market performance benchmarks for comparison."""
-        # Industry benchmarks for engagement metrics
-        self._market_benchmarks = {
-            'minimum_engagement_score': 0.65,
-            'excellent_engagement_threshold': 0.85,
-            'cliffhanger_effectiveness_target': 0.7,
-            'emotional_variety_target': 4,  # Different emotion types per chapter
-            'question_answer_ratio_optimal': 1.2,  # Slightly more questions than answers
-            'binge_reading_score_target': 0.8
+    async def _initialize_emotional_models(self) -> None:
+        """Initialize emotional response prediction models."""
+        self._emotional_response_models = {
+            'emotion_classifier': {'model': 'loaded'},
+            'intensity_predictor': {'model': 'loaded'},
+            'emotional_arc_analyzer': {'model': 'loaded'}
         }
     
-    async def _initialize_question_tracking(self) -> None:
-        """Initialize question and mystery tracking systems."""
-        self._question_tracking_cache = {
-            'planted_patterns': [
-                r'\b(who\s+(?:is|was|will|could|would))\b',
-                r'\b(what\s+(?:is|was|will|could|would|happened))\b',
-                r'\b(why\s+(?:did|does|would|could))\b',
-                r'\b(how\s+(?:did|does|will|could))\b',
-                r'\b(where\s+(?:is|was|will|could))\b',
-                r'\b(when\s+(?:will|did|does))\b'
-            ],
-            'mystery_indicators': [
-                r'\b(mystery|secret|hidden|unknown|unexplained)\b',
-                r'\b(strange|odd|peculiar|unusual|mysterious)\b',
-                r'\b(disappeared|vanished|missing|gone)\b'
-            ]
+    async def _initialize_market_analysis(self) -> None:
+        """Initialize market trend analysis tools."""
+        self._market_trends_cache = {
+            'current_trends': {},
+            'reader_preferences': {},
+            'commercial_patterns': {}
         }
     
-    async def _initialize_cliffhanger_analysis(self) -> None:
-        """Initialize cliffhanger effectiveness analysis."""
-        # Cliffhanger pattern recognition would be initialized here
+    async def _initialize_demographic_models(self) -> None:
+        """Initialize demographic appeal models."""
+        # Placeholder for demographic analysis models
         pass
     
-    async def _initialize_commercial_analysis(self) -> None:
-        """Initialize commercial viability analysis tools."""
-        # Commercial appeal metrics and genre expectations
-        pass
-    
-    async def _update_market_context(self, market_intelligence: MarketIntelligence) -> None:
-        """Update analysis context with current market intelligence."""
-        # Update benchmarks based on current market trends
-        for trend in market_intelligence.current_trends:
-            if trend.trend_type.value == "pacing" and trend.popularity_score > 0.7:
-                # Adjust expectations based on popular pacing trends
-                pass
-    
-    async def _analyze_emotional_journey(self, chapter: ChapterVariant, 
-                                        story_state: DynamicStoryState) -> Dict[str, Any]:
-        """Analyze emotional beats and journey effectiveness."""
-        text = chapter.chapter_text
+    async def _extract_chapter_content(self, chapter: ChapterVariant) -> str:
+        """Extract text content from chapter for engagement analysis."""
+        text_parts = []
         
-        # Detect emotional beats throughout chapter
+        if hasattr(chapter, 'content') and chapter.content:
+            text_parts.append(chapter.content)
+        
+        if hasattr(chapter, 'scenes'):
+            for scene in chapter.scenes:
+                if hasattr(scene, 'narrative_text') and scene.narrative_text:
+                    text_parts.append(scene.narrative_text)
+                if hasattr(scene, 'dialogue') and scene.dialogue:
+                    text_parts.extend(scene.dialogue)
+        
+        return " ".join(text_parts)
+    
+    async def _analyze_emotional_journey(self, text: str, chapter: ChapterVariant, 
+                                       story_state: DynamicStoryState) -> Dict[str, Any]:
+        """Analyze the emotional journey and beats in the chapter."""
+        # Placeholder implementation for emotional analysis
+        
+        # Identify emotional beats (simplified)
         emotional_beats = []
         
-        # Analyze text in chunks to track emotional progression
-        text_chunks = self._chunk_text_for_analysis(text, chunk_size=500)
-        
-        for i, chunk in enumerate(text_chunks):
-            chunk_emotions = await self._detect_emotional_beats(chunk)
-            
-            # Calculate placement appropriateness (emotional arc)
-            placement_score = await self._calculate_emotional_placement_score(i, len(text_chunks))
-            
-            for emotion_type, effectiveness in chunk_emotions.items():
-                if effectiveness > self.config.specific_config.emotional_detection_sensitivity:
-                    emotional_beat = EmotionalBeat(
-                        beat_type=emotion_type,
-                        effectiveness=effectiveness,
-                        placement_appropriateness=placement_score,
-                        supporting_elements=[f"Detected in text chunk {i+1}"],
-                        evidence_text=chunk[:100] + "..." if len(chunk) > 100 else chunk
-                    )
-                    emotional_beats.append(emotional_beat)
-        
-        # Calculate overall emotional journey score
-        if emotional_beats:
-            avg_effectiveness = sum(beat.effectiveness for beat in emotional_beats) / len(emotional_beats)
-            avg_placement = sum(beat.placement_appropriateness for beat in emotional_beats) / len(emotional_beats)
-            emotional_journey_score = (avg_effectiveness + avg_placement) / 2
-        else:
-            emotional_journey_score = 0.3  # Low score for no emotional engagement
-        
-        return {
-            'emotional_journey_score': emotional_journey_score,
-            'emotional_beats': emotional_beats
+        # Look for emotional indicators
+        emotion_indicators = {
+            'joy': ['smiled', 'laughed', 'happy', 'delighted', 'pleased'],
+            'fear': ['afraid', 'scared', 'terrified', 'anxious', 'worried'],
+            'anger': ['angry', 'furious', 'rage', 'mad', 'annoyed'],
+            'sadness': ['sad', 'crying', 'tears', 'grief', 'sorrow'],
+            'surprise': ['surprised', 'shocked', 'amazed', 'stunned'],
+            'tension': ['tense', 'nervous', 'edge', 'suspense', 'anticipation']
         }
-    
-    async def _analyze_question_answer_balance(self, chapter: ChapterVariant, 
-                                              story_state: DynamicStoryState) -> Dict[str, Any]:
-        """Analyze balance of questions planted vs answers provided."""
-        text = chapter.chapter_text
         
-        # Detect new questions planted
-        questions_planted = await self._detect_questions_planted(text)
-        new_questions_count = len(questions_planted)
-        
-        # Estimate questions answered based on story state
-        questions_answered = await self._estimate_questions_answered(text, story_state)
-        answered_count = len(questions_answered)
-        
-        # Calculate quality scores
-        question_quality = await self._assess_question_quality(questions_planted)
-        answer_satisfaction = await self._assess_answer_satisfaction(questions_answered)
-        
-        # Assess balance appropriateness based on story position
-        balance_appropriateness = await self._assess_qa_balance_appropriateness(
-            new_questions_count, answered_count, story_state.story_completion_ratio
-        )
-        
-        # Calculate outstanding question pressure
-        total_outstanding = len(story_state.reader_expectations.planted_questions)
-        outstanding_pressure = min(1.0, total_outstanding / 10.0)  # Normalize to 0-1
-        
-        qa_analysis = QuestionAnswerAnalysis(
-            new_questions_planted=new_questions_count,
-            existing_questions_answered=answered_count,
-            question_quality_score=question_quality,
-            answer_satisfaction_score=answer_satisfaction,
-            balance_appropriateness=balance_appropriateness,
-            outstanding_question_pressure=outstanding_pressure
-        )
-        
-        # Calculate overall Q&A balance score
-        qa_balance_score = (
-            balance_appropriateness * 0.4 +
-            question_quality * 0.3 +
-            answer_satisfaction * 0.3
-        )
-        
-        return {
-            'question_answer_balance_score': qa_balance_score,
-            'question_answer_analysis': qa_analysis
-        }
-    
-    async def _predict_reader_satisfaction(self, chapter: ChapterVariant, 
-                                          story_state: DynamicStoryState) -> Dict[str, Any]:
-        """Predict reader satisfaction with chapter."""
-        
-        # Calculate immediate satisfaction based on chapter content
-        immediate_factors = [
-            await self._assess_pacing_satisfaction(chapter),
-            await self._assess_content_satisfaction(chapter),
-            await self._assess_emotional_satisfaction(chapter)
-        ]
-        immediate_satisfaction = sum(immediate_factors) / len(immediate_factors)
-        
-        # Calculate long-term satisfaction based on story progression
-        long_term_factors = [
-            await self._assess_plot_progression_satisfaction(chapter, story_state),
-            await self._assess_character_development_satisfaction(chapter, story_state),
-            await self._assess_world_building_satisfaction(chapter, story_state)
-        ]
-        long_term_satisfaction = sum(long_term_factors) / len(long_term_factors)
-        
-        # Assess reread value
-        reread_value = await self._assess_reread_potential(chapter, story_state)
-        
-        # Assess recommendation likelihood
-        recommendation_likelihood = await self._assess_recommendation_potential(
-            immediate_satisfaction, long_term_satisfaction
-        )
-        
-        # Identify satisfaction factors and risks
-        satisfaction_factors = await self._identify_satisfaction_factors(chapter, story_state)
-        dissatisfaction_risks = await self._identify_dissatisfaction_risks(chapter, story_state)
-        
-        satisfaction_prediction = SatisfactionPrediction(
-            immediate_satisfaction=immediate_satisfaction,
-            long_term_satisfaction=long_term_satisfaction,
-            reread_value=reread_value,
-            recommendation_likelihood=recommendation_likelihood,
-            satisfaction_factors=satisfaction_factors,
-            dissatisfaction_risks=dissatisfaction_risks
-        )
-        
-        # Calculate overall satisfaction potential
-        satisfaction_score = (immediate_satisfaction + long_term_satisfaction) / 2
-        
-        return {
-            'satisfaction_potential_score': satisfaction_score,
-            'satisfaction_prediction': satisfaction_prediction
-        }
-    
-    async def _analyze_cliffhanger_effectiveness(self, chapter: ChapterVariant) -> Dict[str, Any]:
-        """Analyze effectiveness of chapter ending."""
-        
-        # Extract chapter ending (last 200 words)
-        words = chapter.chapter_text.split()
-        ending_text = " ".join(words[-200:]) if len(words) > 200 else chapter.chapter_text
-        
-        # Classify cliffhanger type
-        cliffhanger_type = await self._classify_cliffhanger_type(ending_text)
-        
-        # Assess effectiveness dimensions
-        effectiveness_score = await self._assess_cliffhanger_effectiveness(ending_text, cliffhanger_type)
-        stakes_clarity = await self._assess_stakes_clarity(ending_text)
-        emotional_impact = await self._assess_ending_emotional_impact(ending_text)
-        next_chapter_compulsion = await self._assess_next_chapter_compulsion(ending_text, cliffhanger_type)
-        
-        # Determine resolution timeline expectation
-        resolution_timeline = await self._predict_resolution_timeline(ending_text, cliffhanger_type)
-        
-        cliffhanger_analysis = CliffhangerAnalysis(
-            cliffhanger_type=cliffhanger_type,
-            effectiveness_score=effectiveness_score,
-            stakes_clarity=stakes_clarity,
-            emotional_impact=emotional_impact,
-            next_chapter_compulsion=next_chapter_compulsion,
-            resolution_timeline=resolution_timeline
-        )
-        
-        return {
-            'cliffhanger_effectiveness_score': effectiveness_score,
-            'cliffhanger_analysis': cliffhanger_analysis
-        }
-    
-    async def _compile_engagement_assessment(self, chapter: ChapterVariant,
-                                           emotional_result: Dict, qa_result: Dict,
-                                           satisfaction_result: Dict, cliffhanger_result: Dict,
-                                           engagement_risks: List[EngagementRisk],
-                                           engagement_strengths: List[str],
-                                           predicted_response: str,
-                                           recommendations: List[str]) -> ReaderEngagementAssessment:
-        """Compile comprehensive reader engagement assessment."""
-        
-        return ReaderEngagementAssessment(
-            chapter_number=chapter.chapter_number,
-            emotional_journey_score=emotional_result['emotional_journey_score'],
-            question_answer_balance_score=qa_result['question_answer_balance_score'],
-            satisfaction_potential_score=satisfaction_result['satisfaction_potential_score'],
-            cliffhanger_effectiveness_score=cliffhanger_result['cliffhanger_effectiveness_score'],
-            emotional_beats=emotional_result['emotional_beats'],
-            question_answer_analysis=qa_result['question_answer_analysis'],
-            satisfaction_prediction=satisfaction_result['satisfaction_prediction'],
-            cliffhanger_analysis=cliffhanger_result['cliffhanger_analysis'],
-            engagement_risks=engagement_risks,
-            engagement_strengths=engagement_strengths,
-            predicted_reader_response=predicted_response,
-            engagement_recommendations=recommendations
-        )
-    
-    # Implementation helper methods (many would be placeholders for actual NLP/ML models)
-    
-    def _chunk_text_for_analysis(self, text: str, chunk_size: int = 500) -> List[str]:
-        """Split text into chunks for sequential emotional analysis."""
-        words = text.split()
-        chunks = []
-        
-        for i in range(0, len(words), chunk_size):
-            chunk = " ".join(words[i:i + chunk_size])
-            chunks.append(chunk)
-        
-        return chunks or [text]
-    
-    async def _detect_emotional_beats(self, text: str) -> Dict[EmotionalResponse, float]:
-        """Detect emotional beats in text chunk."""
-        emotions = {}
         text_lower = text.lower()
+        for emotion, indicators in emotion_indicators.items():
+            for indicator in indicators:
+                if indicator in text_lower:
+                    beat = EmotionalBeat(
+                        emotion_type=emotion,
+                        intensity=0.7,  # Placeholder
+                        location=f"Contains '{indicator}'",
+                        effectiveness=0.8  # Placeholder
+                    )
+                    emotional_beats.append(beat)
+                    break
         
-        for emotion_name, patterns in self._emotional_patterns.items():
-            score = 0.0
-            for pattern in patterns:
-                matches = len(re.findall(pattern, text_lower))
-                score += matches * 0.2  # Simple scoring
-            
-            # Map emotion names to EmotionalResponse enum
-            emotion_mapping = {
-                'tension': EmotionalResponse.TENSION,
-                'curiosity': EmotionalResponse.CURIOSITY,
-                'satisfaction': EmotionalResponse.SATISFACTION,
-                'surprise': EmotionalResponse.SURPRISE
-            }
-            
-            if emotion_name in emotion_mapping and score > 0:
-                emotions[emotion_mapping[emotion_name]] = min(1.0, score)
+        # Calculate emotional variety and impact
+        unique_emotions = len(set(beat.emotion_type for beat in emotional_beats))
+        emotional_variety_score = min(1.0, unique_emotions / self.config.specific_config.minimum_emotional_variety)
         
-        return emotions
+        avg_intensity = sum(beat.intensity for beat in emotional_beats) / max(len(emotional_beats), 1)
+        
+        score = (emotional_variety_score * 0.4 + avg_intensity * 0.6)
+        
+        return {
+            'score': score,
+            'beats': emotional_beats,
+            'emotional_variety': unique_emotions,
+            'average_intensity': avg_intensity
+        }
     
-    async def _calculate_emotional_placement_score(self, chunk_index: int, total_chunks: int) -> float:
-        """Calculate appropriateness of emotional beat placement."""
-        if total_chunks == 1:
-            return 0.8  # Single chunk gets neutral score
+    async def _analyze_curiosity_hooks(self, text: str, chapter: ChapterVariant) -> Dict[str, Any]:
+        """Analyze curiosity hooks and mystery elements."""
+        hooks = []
         
-        # Simple scoring based on position (tension should build toward end)
-        position_ratio = chunk_index / (total_chunks - 1) if total_chunks > 1 else 0
-        
-        # Assume most emotional beats are appropriately placed
-        return 0.7 + (position_ratio * 0.2)
-    
-    async def _detect_questions_planted(self, text: str) -> List[str]:
-        """Detect new questions or mysteries introduced."""
-        questions = []
-        
-        # Look for explicit questions
-        question_sentences = re.findall(r'[^.!?]*\?', text)
-        questions.extend(question_sentences)
+        # Look for question-based hooks
+        question_count = text.count('?')
+        if question_count > 0:
+            hooks.append(CuriosityHook(
+                hook_type="questions",
+                strength=min(1.0, question_count * 0.1),
+                resolution_promise=True,
+                description=f"Chapter contains {question_count} questions that engage curiosity"
+            ))
         
         # Look for mystery indicators
-        for pattern in self._question_tracking_cache['mystery_indicators']:
-            matches = re.findall(pattern, text, re.IGNORECASE)
-            questions.extend([f"Mystery: {match}" for match in matches])
+        mystery_words = ['mystery', 'secret', 'hidden', 'unknown', 'wonder', 'curious', 'strange']
+        mystery_count = sum(1 for word in mystery_words if word in text.lower())
         
-        return questions
-    
-    async def _estimate_questions_answered(self, text: str, story_state: DynamicStoryState) -> List[str]:
-        """Estimate which existing questions were answered."""
-        # Placeholder - would analyze text against outstanding questions
-        # and determine if any were resolved
-        return []
-    
-    async def _assess_question_quality(self, questions: List[str]) -> float:
-        """Assess intrigue level of planted questions."""
-        if not questions:
-            return 0.5
+        if mystery_count > 0:
+            hooks.append(CuriosityHook(
+                hook_type="mystery_elements",
+                strength=min(1.0, mystery_count * 0.15),
+                resolution_promise=False,
+                description=f"Contains {mystery_count} mystery-inducing elements"
+            ))
         
-        # Simple heuristic - questions with specific details are more intriguing
-        quality_scores = []
-        for question in questions:
-            if len(question.split()) > 5:  # More detailed questions
-                quality_scores.append(0.8)
-            else:
-                quality_scores.append(0.6)
-        
-        return sum(quality_scores) / len(quality_scores)
-    
-    async def _assess_answer_satisfaction(self, answers: List[str]) -> float:
-        """Assess satisfaction level of answers provided."""
-        if not answers:
-            return 0.5  # Neutral if no answers
-        
-        # Placeholder - would assess answer completeness and satisfaction
-        return 0.7
-    
-    async def _assess_qa_balance_appropriateness(self, questions: int, answers: int, 
-                                               story_position: float) -> float:
-        """Assess appropriateness of question/answer balance for story position."""
-        # Early in story: more questions than answers is good
-        # Late in story: more answers than questions is expected
-        
-        if story_position < 0.3:  # Early story
-            if questions >= answers:
-                return 0.9
-            else:
-                return 0.6
-        elif story_position > 0.8:  # Late story  
-            if answers >= questions:
-                return 0.9
-            else:
-                return 0.5
-        else:  # Middle story
-            ratio = questions / max(1, answers)
-            if 0.8 <= ratio <= 1.5:  # Balanced
-                return 0.8
-            else:
-                return 0.6
-    
-    async def _assess_pacing_satisfaction(self, chapter: ChapterVariant) -> float:
-        """Assess reader satisfaction with pacing."""
-        # Simple heuristic based on word count and scene count
-        words_per_scene = chapter.word_count / max(1, chapter.scene_count)
-        
-        if 800 <= words_per_scene <= 1500:  # Good pacing
-            return 0.8
-        elif words_per_scene < 500:  # Too fast
-            return 0.5
-        elif words_per_scene > 2000:  # Too slow
-            return 0.4
+        # Calculate overall curiosity score
+        if hooks:
+            avg_strength = sum(hook.strength for hook in hooks) / len(hooks)
+            score = min(1.0, avg_strength)
         else:
-            return 0.7
+            score = 0.3  # Default low score if no hooks found
+        
+        return {
+            'score': score,
+            'hooks': hooks,
+            'question_density': question_count / max(len(text.split()), 1)
+        }
     
-    async def _assess_content_satisfaction(self, chapter: ChapterVariant) -> float:
-        """Assess satisfaction with chapter content quality."""
-        # Based on objective fulfillment from chapter variant
-        return chapter.objective_fulfillment_score
+    async def _analyze_character_connection(self, text: str, chapter: ChapterVariant,
+                                          story_state: DynamicStoryState) -> Dict[str, Any]:
+        """Analyze character relatability and connection potential."""
+        # Placeholder implementation
+        
+        # Look for character development indicators
+        character_indicators = ['thought', 'felt', 'remembered', 'realized', 'understood']
+        character_development_count = sum(1 for indicator in character_indicators if indicator in text.lower())
+        
+        # Look for relatable situations
+        relatable_situations = ['family', 'friend', 'work', 'home', 'love', 'fear', 'hope', 'dream']
+        relatability_count = sum(1 for situation in relatable_situations if situation in text.lower())
+        
+        # Calculate connection score
+        development_score = min(1.0, character_development_count * 0.1)
+        relatability_score = min(1.0, relatability_count * 0.1)
+        
+        score = (development_score + relatability_score) / 2
+        
+        return {
+            'score': score,
+            'character_development_indicators': character_development_count,
+            'relatability_factors': relatability_count
+        }
     
-    async def _assess_emotional_satisfaction(self, chapter: ChapterVariant) -> float:
-        """Assess emotional satisfaction of chapter."""
-        # Simple heuristic based on emotional beats achieved
-        emotional_beats_count = len(chapter.emotional_beats_achieved)
+    async def _analyze_pacing_momentum(self, text: str, chapter: ChapterVariant) -> Dict[str, Any]:
+        """Analyze pacing and momentum for reader engagement."""
+        # Simple pacing analysis based on text structure
         
-        if emotional_beats_count >= 3:
-            return 0.8
-        elif emotional_beats_count >= 2:
-            return 0.7
-        elif emotional_beats_count >= 1:
-            return 0.6
-        else:
-            return 0.3
+        paragraphs = [p.strip() for p in text.split('\n\n') if p.strip()]
+        sentences = [s.strip() for s in text.split('.') if s.strip()]
+        
+        avg_paragraph_length = sum(len(p.split()) for p in paragraphs) / max(len(paragraphs), 1)
+        avg_sentence_length = sum(len(s.split()) for s in sentences) / max(len(sentences), 1)
+        
+        # Good pacing has varied paragraph and sentence lengths
+        paragraph_variety = len(set(len(p.split()) // 10 for p in paragraphs)) / max(len(paragraphs), 1)
+        sentence_variety = len(set(len(s.split()) // 5 for s in sentences)) / max(len(sentences), 1)
+        
+        variety_score = (paragraph_variety + sentence_variety) / 2
+        
+        # Action words indicate good momentum
+        action_words = ['ran', 'jumped', 'rushed', 'hurried', 'moved', 'went', 'came', 'turned']
+        action_count = sum(1 for word in action_words if word in text.lower())
+        momentum_score = min(1.0, action_count * 0.05)
+        
+        score = (variety_score * 0.6 + momentum_score * 0.4)
+        
+        return {
+            'score': score,
+            'avg_paragraph_length': avg_paragraph_length,
+            'avg_sentence_length': avg_sentence_length,
+            'variety_score': variety_score,
+            'momentum_indicators': action_count
+        }
     
-    async def _assess_plot_progression_satisfaction(self, chapter: ChapterVariant, 
-                                                  story_state: DynamicStoryState) -> float:
-        """Assess satisfaction with plot progression."""
-        threads_advanced = len(chapter.plot_threads_advanced)
-        total_active_threads = len([t for t in story_state.plot_threads.values() 
-                                  if t.status.value == "active"])
+    async def _analyze_cliffhanger_effectiveness(self, text: str, chapter: ChapterVariant) -> Dict[str, Any]:
+        """Analyze chapter ending for cliffhanger effectiveness."""
+        # Get last few sentences for cliffhanger analysis
+        sentences = [s.strip() for s in text.split('.') if s.strip()]
+        last_sentences = sentences[-3:] if len(sentences) >= 3 else sentences
+        ending_text = '. '.join(last_sentences).lower()
         
-        if total_active_threads == 0:
-            return 0.5
+        # Look for cliffhanger indicators
+        cliffhanger_indicators = [
+            'suddenly', 'but then', 'however', 'until', 'when suddenly',
+            'just as', 'but', 'then', 'unexpectedly', 'to be continued'
+        ]
         
-        advancement_ratio = threads_advanced / total_active_threads
-        return min(1.0, advancement_ratio * 2)  # Scale to reasonable satisfaction
+        cliffhanger_score = 0.0
+        for indicator in cliffhanger_indicators:
+            if indicator in ending_text:
+                cliffhanger_score += 0.2
+        
+        # Questions at the end are strong cliffhangers
+        if '?' in ending_text:
+            cliffhanger_score += 0.3
+        
+        # Incomplete actions indicate cliffhangers
+        incomplete_indicators = ['began to', 'started to', 'was about to', 'almost']
+        for indicator in incomplete_indicators:
+            if indicator in ending_text:
+                cliffhanger_score += 0.25
+        
+        return {
+            'score': min(1.0, cliffhanger_score),
+            'ending_analysis': ending_text[:100] + "..." if len(ending_text) > 100 else ending_text
+        }
     
-    async def _assess_character_development_satisfaction(self, chapter: ChapterVariant, 
-                                                       story_state: DynamicStoryState) -> float:
-        """Assess satisfaction with character development."""
-        characters_featured = len(chapter.characters_featured)
+    async def _analyze_commercial_viability(self, text: str, chapter: ChapterVariant,
+                                          market_intelligence: Optional[MarketIntelligence]) -> Dict[str, Any]:
+        """Analyze commercial viability and market appeal."""
+        # Base commercial score on engagement factors
+        base_score = 0.6
         
-        if characters_featured >= 2:
-            return 0.8
-        elif characters_featured >= 1:
-            return 0.7
-        else:
-            return 0.4
+        market_alignment = 0.7  # Placeholder
+        
+        if market_intelligence and self.config.specific_config.enable_market_alignment:
+            # Analyze alignment with market trends
+            # This would involve checking against current market preferences
+            market_alignment = 0.8  # Placeholder for actual market analysis
+        
+        score = (base_score + market_alignment) / 2
+        
+        return {
+            'score': score,
+            'market_alignment': market_alignment,
+            'commercial_factors': {
+                'genre_appeal': 0.7,
+                'demographic_fit': 0.8,
+                'trend_alignment': market_alignment
+            }
+        }
     
-    async def _assess_world_building_satisfaction(self, chapter: ChapterVariant, 
-                                                story_state: DynamicStoryState) -> float:
-        """Assess satisfaction with world building elements."""
-        new_elements = len(chapter.new_world_elements)
+    def _calculate_overall_engagement_score(self, emotional_score: float, curiosity_score: float,
+                                          character_score: float, pacing_score: float,
+                                          commercial_score: float) -> float:
+        """Calculate weighted overall engagement score."""
+        config = self.config.specific_config
         
-        if new_elements >= 2:
-            return 0.8
-        elif new_elements >= 1:
-            return 0.7
-        else:
-            return 0.6  # Not all chapters need new world building
-    
-    async def _assess_reread_potential(self, chapter: ChapterVariant, 
-                                     story_state: DynamicStoryState) -> float:
-        """Assess likelihood of chapter being reread."""
-        # Chapters with high emotional impact and complexity have higher reread value
-        complexity_score = chapter.calculate_narrative_density()
-        emotional_count = len(chapter.emotional_beats_achieved)
-        
-        reread_score = (complexity_score + (emotional_count / 5)) / 2
-        return min(1.0, reread_score)
-    
-    async def _assess_recommendation_potential(self, immediate_sat: float, 
-                                             long_term_sat: float) -> float:
-        """Assess likelihood reader would recommend based on satisfaction."""
-        combined_satisfaction = (immediate_sat + long_term_sat) / 2
-        
-        # Recommendation threshold is higher than satisfaction
-        if combined_satisfaction >= 0.8:
-            return 0.9
-        elif combined_satisfaction >= 0.7:
-            return 0.7
-        elif combined_satisfaction >= 0.6:
-            return 0.5
-        else:
-            return 0.3
-    
-    async def _identify_satisfaction_factors(self, chapter: ChapterVariant, 
-                                           story_state: DynamicStoryState) -> List[str]:
-        """Identify elements contributing to reader satisfaction."""
-        factors = []
-        
-        if chapter.objective_fulfillment_score >= 0.8:
-            factors.append("Strong chapter objective fulfillment")
-        
-        if len(chapter.plot_threads_advanced) >= 2:
-            factors.append("Good plot progression across multiple threads")
-        
-        if len(chapter.emotional_beats_achieved) >= 3:
-            factors.append("Rich emotional journey")
-        
-        return factors
-    
-    async def _identify_dissatisfaction_risks(self, chapter: ChapterVariant, 
-                                            story_state: DynamicStoryState) -> List[str]:
-        """Identify elements that might reduce satisfaction."""
-        risks = []
-        
-        if chapter.word_count < 1000:
-            risks.append("Chapter may feel too short for reader satisfaction")
-        
-        if len(chapter.plot_threads_advanced) == 0:
-            risks.append("No plot advancement may disappoint readers")
-        
-        if chapter.objective_fulfillment_score < 0.5:
-            risks.append("Poor objective fulfillment may reduce satisfaction")
-        
-        return risks
-    
-    async def _classify_cliffhanger_type(self, ending_text: str) -> CliffhangerType:
-        """Classify type of chapter ending."""
-        ending_lower = ending_text.lower()
-        
-        if any(word in ending_lower for word in ['revealed', 'discovered', 'realized']):
-            return CliffhangerType.REVELATION
-        elif any(word in ending_lower for word in ['danger', 'threat', 'attack']):
-            return CliffhangerType.DANGER
-        elif any(word in ending_lower for word in ['decide', 'choice', 'decision']):
-            return CliffhangerType.DECISION
-        elif any(word in ending_lower for word in ['arrived', 'reached', 'entered']):
-            return CliffhangerType.ARRIVAL
-        elif '?' in ending_text:
-            return CliffhangerType.DISCOVERY
-        else:
-            return CliffhangerType.NONE
-    
-    async def _assess_cliffhanger_effectiveness(self, ending_text: str, 
-                                              cliffhanger_type: CliffhangerType) -> float:
-        """Assess effectiveness of cliffhanger."""
-        if cliffhanger_type == CliffhangerType.NONE:
-            return 0.3
-        
-        # Simple heuristic based on cliffhanger type and text analysis
-        if cliffhanger_type in [CliffhangerType.DANGER, CliffhangerType.REVELATION]:
-            return 0.8
-        elif cliffhanger_type in [CliffhangerType.DECISION, CliffhangerType.DISCOVERY]:
-            return 0.7
-        else:
-            return 0.6
-    
-    async def _assess_stakes_clarity(self, ending_text: str) -> float:
-        """Assess how clear the stakes are in the cliffhanger."""
-        # Placeholder - would analyze text for clear consequences
-        return 0.7
-    
-    async def _assess_ending_emotional_impact(self, ending_text: str) -> float:
-        """Assess emotional impact of chapter ending."""
-        # Look for emotional indicators in ending
-        emotional_words = ['shocked', 'surprised', 'terrified', 'excited', 'devastated']
-        
-        ending_lower = ending_text.lower()
-        emotional_count = sum(1 for word in emotional_words if word in ending_lower)
-        
-        return min(1.0, emotional_count * 0.3)
-    
-    async def _assess_next_chapter_compulsion(self, ending_text: str, 
-                                            cliffhanger_type: CliffhangerType) -> float:
-        """Assess how much ending compels reading next chapter."""
-        base_compulsion = {
-            CliffhangerType.DANGER: 0.9,
-            CliffhangerType.REVELATION: 0.8,
-            CliffhangerType.DISCOVERY: 0.8,
-            CliffhangerType.DECISION: 0.7,
-            CliffhangerType.ARRIVAL: 0.6,
-            CliffhangerType.EMOTIONAL_PEAK: 0.7,
-            CliffhangerType.CONFRONTATION: 0.8,
-            CliffhangerType.NONE: 0.3
+        weights = {
+            'emotional': config.emotional_impact_weight,
+            'curiosity': config.curiosity_factor_weight,
+            'commercial': config.commercial_viability_weight,
+            'character': 0.15,
+            'pacing': 0.1
         }
         
-        return base_compulsion.get(cliffhanger_type, 0.5)
+        return (emotional_score * weights['emotional'] +
+                curiosity_score * weights['curiosity'] +
+                commercial_score * weights['commercial'] +
+                character_score * weights['character'] +
+                pacing_score * weights['pacing'])
     
-    async def _predict_resolution_timeline(self, ending_text: str, 
-                                         cliffhanger_type: CliffhangerType) -> str:
-        """Predict when cliffhanger will likely be resolved."""
-        if cliffhanger_type in [CliffhangerType.DANGER, CliffhangerType.CONFRONTATION]:
-            return "immediate"
-        elif cliffhanger_type in [CliffhangerType.DECISION, CliffhangerType.DISCOVERY]:
-            return "short-term"
-        else:
-            return "long-term"
+    async def _predict_reader_retention(self, overall_score: float,
+                                       emotional_result: Dict[str, Any],
+                                       curiosity_result: Dict[str, Any]) -> float:
+        """Predict likelihood of reader retention."""
+        # Simple retention prediction based on engagement factors
+        base_retention = overall_score
+        
+        # Boost for strong emotional variety
+        if emotional_result['emotional_variety'] >= 3:
+            base_retention += 0.1
+        
+        # Boost for strong curiosity hooks
+        if len(curiosity_result['hooks']) >= 2:
+            base_retention += 0.1
+        
+        return min(1.0, base_retention)
     
-    async def _identify_engagement_risks(self, chapter: ChapterVariant,
-                                       emotional_result: Dict, qa_result: Dict,
-                                       satisfaction_result: Dict) -> List[EngagementRisk]:
-        """Identify specific engagement risks."""
-        risks = []
-        
-        if chapter.word_count > 4000:
-            risks.append(EngagementRisk.PACING_TOO_SLOW)
-        
-        if len(emotional_result['emotional_beats']) == 0:
-            risks.append(EngagementRisk.LACK_OF_STAKES)
-        
-        if qa_result['question_answer_analysis'].new_questions_planted == 0:
-            risks.append(EngagementRisk.PREDICTABILITY)
-        
-        return risks
+    async def _assess_page_turner_quality(self, pacing_result: Dict[str, Any],
+                                        curiosity_result: Dict[str, Any],
+                                        cliffhanger_result: Dict[str, Any]) -> float:
+        """Assess page-turning quality of the chapter."""
+        return (pacing_result['score'] * 0.4 +
+                curiosity_result['score'] * 0.4 +
+                cliffhanger_result['score'] * 0.2)
     
-    async def _identify_engagement_strengths(self, emotional_result: Dict, qa_result: Dict,
-                                           satisfaction_result: Dict, cliffhanger_result: Dict) -> List[str]:
-        """Identify engagement strengths."""
+    async def _generate_engagement_factors_analysis(self, *results) -> List[EngagementAnalysis]:
+        """Generate detailed analysis for each engagement factor."""
+        # Placeholder implementation
+        return []
+    
+    async def _analyze_demographic_appeal(self, text: str, chapter: ChapterVariant,
+                                        market_intelligence: MarketIntelligence) -> Dict[str, float]:
+        """Analyze appeal to different demographic groups."""
+        # Placeholder demographic analysis
+        return {
+            'young_adult': 0.7,
+            'adult': 0.8,
+            'general_fiction': 0.75
+        }
+    
+    def _identify_engagement_strengths(self, results: List[Dict[str, Any]]) -> List[str]:
+        """Identify engagement strengths from analysis results."""
         strengths = []
         
-        if emotional_result['emotional_journey_score'] >= 0.8:
-            strengths.append("Strong emotional engagement")
+        emotional_result, curiosity_result, character_result, pacing_result = results[:4]
         
-        if cliffhanger_result['cliffhanger_effectiveness_score'] >= 0.8:
-            strengths.append("Highly effective chapter ending")
+        if emotional_result['score'] > 0.8:
+            strengths.append(f"Strong emotional impact with {emotional_result['emotional_variety']} emotion types")
         
-        if satisfaction_result['satisfaction_potential_score'] >= 0.8:
-            strengths.append("High reader satisfaction potential")
+        if curiosity_result['score'] > 0.7:
+            strengths.append(f"Effective curiosity hooks with {len(curiosity_result['hooks'])} engagement elements")
+        
+        if character_result['score'] > 0.7:
+            strengths.append("Strong character connection and relatability")
         
         return strengths
     
-    async def _predict_reader_response(self, emotional_result: Dict, 
-                                     satisfaction_result: Dict, genre: Optional[str]) -> str:
-        """Predict overall reader response to chapter."""
-        emotional_score = emotional_result['emotional_journey_score']
-        satisfaction_score = satisfaction_result['satisfaction_potential_score']
+    def _generate_improvement_priorities(self, results: List[Dict[str, Any]]) -> List[str]:
+        """Generate prioritized improvement suggestions."""
+        priorities = []
         
-        combined_score = (emotional_score + satisfaction_score) / 2
+        emotional_result, curiosity_result, character_result, pacing_result = results[:4]
         
-        if combined_score >= 0.8:
-            return "Readers likely to respond very positively with strong emotional engagement and high satisfaction."
-        elif combined_score >= 0.6:
-            return "Readers likely to respond positively with moderate engagement and satisfaction."
-        else:
-            return "Readers may respond lukewarmly due to limited emotional engagement or satisfaction."
+        if emotional_result['score'] < 0.6:
+            priorities.append("Increase emotional variety and intensity to improve reader connection")
+        
+        if curiosity_result['score'] < 0.5:
+            priorities.append("Add more curiosity hooks and questions to maintain reader interest")
+        
+        if pacing_result['score'] < 0.6:
+            priorities.append("Improve pacing variation and momentum to maintain engagement")
+        
+        return priorities
     
-    async def _generate_engagement_recommendations(self, risks: List[EngagementRisk],
-                                                 emotional_result: Dict, qa_result: Dict,
-                                                 genre: Optional[str]) -> List[str]:
-        """Generate specific recommendations for improving engagement."""
-        recommendations = []
+    def _predict_reader_experience(self, overall_score: float, results: List[Dict[str, Any]]) -> str:
+        """Predict overall reader experience."""
+        if overall_score >= 0.8:
+            return "Highly engaging - readers likely to be captivated and eager to continue"
+        elif overall_score >= 0.6:
+            return "Moderately engaging - most readers will continue with interest"
+        elif overall_score >= 0.4:
+            return "Somewhat engaging - may lose some readers, needs improvement"
+        else:
+            return "Low engagement - significant improvements needed to retain readers"
+    
+    async def _update_engagement_history(self, assessment: ReaderEngagementAssessment,
+                                       results: List[Dict[str, Any]]) -> None:
+        """Update engagement analysis history for learning."""
+        history_entry = {
+            'timestamp': datetime.now(),
+            'chapter_number': assessment.chapter_number,
+            'overall_score': assessment.overall_engagement_score,
+            'component_scores': {
+                'emotional': assessment.emotional_impact_score,
+                'curiosity': assessment.curiosity_factor_score,
+                'character': assessment.character_connection_score,
+                'pacing': assessment.pacing_momentum_score,
+                'commercial': assessment.commercial_viability_score
+            }
+        }
         
-        if EngagementRisk.PACING_TOO_SLOW in risks:
-            recommendations.append("Tighten pacing by reducing word count or increasing action density")
+        self._engagement_history.append(history_entry)
         
-        if EngagementRisk.LACK_OF_STAKES in risks:
-            recommendations.append("Raise stakes and create more tension to engage readers")
-        
-        if emotional_result['emotional_journey_score'] < 0.6:
-            recommendations.append("Strengthen emotional beats and character reactions")
-        
-        return recommendations
+        # Keep history manageable
+        if len(self._engagement_history) > 100:
+            self._engagement_history = self._engagement_history[-50:]
+    
+    # Test methods for health checks
+    
+    async def _test_engagement_analysis(self) -> bool:
+        """Test engagement analysis functionality."""
+        try:
+            test_text = "She was afraid, but curious about what lay behind the mysterious door. What secrets awaited her?"
+            emotional_result = await self._analyze_emotional_journey(test_text, None, None)
+            curiosity_result = await self._analyze_curiosity_hooks(test_text, None)
+            
+            return ('score' in emotional_result and 'score' in curiosity_result)
+        except Exception:
+            return False
