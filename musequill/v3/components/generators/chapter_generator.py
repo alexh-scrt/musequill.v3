@@ -7,9 +7,9 @@ chapter variants based on story state, objectives, and market intelligence.
 
 import asyncio
 import json
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Set
 from datetime import datetime
-
+from pydantic import Field, BaseModel
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError
 )
@@ -17,13 +17,13 @@ from musequill.v3.models.chapter_objective import ChapterObjective
 from musequill.v3.models.chapter_variant import ChapterVariant, ChapterApproach, SceneStructure, GenerationMetadata
 from musequill.v3.models.dynamic_story_state import DynamicStoryState
 from musequill.v3.models.market_intelligence import MarketIntelligence
-
+from musequill.v3.llm.ollama.ollama_client import LLMService, create_llm_service
 
 class ChapterGeneratorConfig(BaseModel):
     """Configuration for Chapter Generator component."""
     
     llm_model_name: str = Field(
-        default="claude-3-sonnet",
+        default="llama3.3:70b",
         description="LLM model to use for generation"
     )
     
@@ -140,7 +140,7 @@ class ChapterGenerator(BaseComponent[ChapterGeneratorInput, ChapterGeneratorOutp
     
     def __init__(self, config: ComponentConfiguration[ChapterGeneratorConfig]):
         super().__init__(config)
-        self._llm_client = None
+        self._llm_client:Optional[LLMService] = None
         self._generation_history: List[Dict[str, Any]] = []
         self._learned_patterns: Dict[str, Any] = {}
         self._context_cache: Dict[str, str] = {}
@@ -293,13 +293,14 @@ class ChapterGenerator(BaseComponent[ChapterGeneratorInput, ChapterGeneratorOutp
         """Initialize LLM client for generation."""
         # Placeholder for actual LLM client initialization
         # Would initialize Anthropic Claude, OpenAI GPT, or other LLM service
-        self._llm_client = {
-            'model': self.config.specific_config.llm_model_name,
-            'temperature': self.config.specific_config.creativity_temperature,
-            'max_tokens': 4000,
-            'initialized': True
-        }
-    
+        self._llm_client = create_llm_service()
+        await self._llm_client.update_default_parameters(
+            {
+                'model': self.config.specific_config.llm_model_name,
+                'temperature': self.config.specific_config.creativity_temperature,
+                'max_tokens': 4000
+            }
+        )
     async def _load_learned_patterns(self) -> None:
         """Load patterns learned from previous generations and critic feedback."""
         # Placeholder for loading learned patterns from persistent storage
@@ -314,8 +315,1008 @@ class ChapterGenerator(BaseComponent[ChapterGeneratorInput, ChapterGeneratorOutp
     
     async def _initialize_context_tools(self) -> None:
         """Initialize tools for context assembly and management."""
-        # Initialize context prioritization and assembly tools
-        pass
+        
+        # Initialize context prioritization system
+        self._context_prioritizer = {
+            'story_context': {
+                'weight': 0.4,
+                'always_include': True,
+                'compression_threshold': 1000,
+                'priority': 1
+            },
+            'chapter_objectives': {
+                'weight': 0.25,
+                'always_include': True,
+                'compression_threshold': 500,
+                'priority': 2
+            },
+            'previous_chapter': {
+                'weight': 0.15,
+                'always_include': False,
+                'compression_threshold': 800,
+                'priority': 3
+            },
+            'market_intelligence': {
+                'weight': 0.1,
+                'always_include': False,
+                'compression_threshold': 600,
+                'priority': 4
+            },
+            'learned_patterns': {
+                'weight': 0.08,
+                'always_include': False,
+                'compression_threshold': 400,
+                'priority': 5
+            },
+            'generation_constraints': {
+                'weight': 0.02,
+                'always_include': False,
+                'compression_threshold': 200,
+                'priority': 6
+            }
+        }
+        
+        # Initialize context assembly utilities
+        self._context_assembler = {
+            'token_estimator': lambda text: len(text.split()) * 1.3,  # Rough token estimation
+            'summarizers': {
+                'extractive': self._extractive_summarize,
+                'abstractive': self._abstractive_summarize,
+                'template': self._template_summarize
+            },
+            'compressors': {
+                'truncation': self._truncate_content,
+                'selective_pruning': self._selective_content_pruning,
+                'semantic_compression': self._semantic_content_compression
+            },
+            'formatters': {
+                'story_context': self._format_story_context,
+                'objectives': self._format_objectives_context,
+                'market_guidance': self._format_market_guidance,
+                'feedback_learnings': self._format_feedback_learnings,
+                'constraints': self._format_constraints
+            }
+        }
+        
+        # Initialize context caching system
+        self._context_cache = {
+            # Cache already initialized in __init__
+        }
+        self._cache_metadata = {
+            'hit_rate': 0.0,
+            'cache_size': 0,
+            'max_cache_size': 100,
+            'ttl_hours': 24,
+            'last_cleanup': datetime.now()
+        }
+        
+        # Initialize context validation tools
+        self._context_validator = {
+            'token_limits': {
+                'total': self.config.specific_config.max_context_tokens,
+                'story_context': int(self.config.specific_config.max_context_tokens * 0.4),
+                'objectives': int(self.config.specific_config.max_context_tokens * 0.25),
+                'market_intelligence': int(self.config.specific_config.max_context_tokens * 0.2),
+                'other_sections': int(self.config.specific_config.max_context_tokens * 0.15)
+            },
+            'required_sections': ['story_context', 'chapter_objectives'],
+            'section_validators': {
+                'story_context': self._validate_story_context,
+                'chapter_objectives': self._validate_objectives_context,
+                'market_intelligence': self._validate_market_context,
+                'learned_patterns': self._validate_feedback_context
+            }
+        }
+        
+        # Initialize intelligent trimming system
+        self._context_trimmer = {
+            'strategies': [
+                ('preserve_critical', self._preserve_critical_sections),
+                ('smart_truncation', self._smart_content_truncation),
+                ('importance_ranking', self._importance_based_trimming),
+                ('semantic_clustering', self._cluster_and_compress)
+            ],
+            'section_importance': {
+                'story_context': 10,
+                'chapter_objectives': 9,
+                'previous_chapter': 7,
+                'market_intelligence': 5,
+                'learned_patterns': 4,
+                'generation_constraints': 3
+            },
+            'preserve_patterns': [
+                r'=== [A-Z\s]+ ===',  # Section headers
+                r'Primary Goal:.*',    # Key objectives
+                r'Word Target:.*',     # Critical requirements
+                r'NEEDS PAYOFF.*',     # Reader expectations
+                r'Active Threads:.*'   # Plot continuity
+            ]
+        }
+        
+        # Initialize adaptive context management
+        self._adaptive_context = {
+            'generation_history': [],
+            'success_patterns': {
+                'effective_context_sizes': {},
+                'successful_section_combinations': [],
+                'optimal_compression_ratios': {}
+            },
+            'failure_analysis': {
+                'context_too_large': 0,
+                'missing_critical_info': 0,
+                'poor_compression': 0
+            },
+            'learning_enabled': self.config.specific_config.adaptive_parameters
+        }
+
+# Helper methods for context tools
+    async def _create_story_analysis(self, story_state: DynamicStoryState, max_tokens: int) -> str:
+        """Create analytical summary of current story state."""
+        analysis_parts = []
+        
+        # Momentum analysis
+        momentum = story_state.calculate_momentum_score()
+        if momentum < 0.3:
+            analysis_parts.append("LOW MOMENTUM - Story needs acceleration")
+        elif momentum > 0.8:
+            analysis_parts.append("HIGH MOMENTUM - Maintain current pace")
+        else:
+            analysis_parts.append(f"Moderate momentum ({momentum:.1f})")
+        
+        # Thread analysis
+        active_threads = story_state.get_active_threads()
+        stagnant_threads = story_state.get_stagnant_threads()
+        
+        if stagnant_threads:
+            analysis_parts.append(f"{len(stagnant_threads)} stagnant threads need attention")
+        
+        resolution_ready = story_state.get_resolution_ready_threads()
+        if resolution_ready:
+            analysis_parts.append(f"{len(resolution_ready)} threads ready for resolution")
+        
+        # Character development analysis
+        chars_needing_dev = story_state.get_characters_needing_development()
+        if chars_needing_dev:
+            analysis_parts.append(f"{len(chars_needing_dev)} characters need development")
+        
+        # Reader satisfaction analysis
+        if story_state.reader_expectations.needs_payoff():
+            debt = story_state.reader_expectations.satisfaction_debt
+            analysis_parts.append(f"Reader satisfaction debt: {debt:.2f} (NEEDS PAYOFF)")
+        
+        # Story phase alignment
+        completion = story_state.story_completion_ratio
+        phase = story_state.story_phase.value
+        analysis_parts.append(f"Story phase: {phase} ({completion:.0%} complete)")
+        
+        # Combine and limit
+        analysis = " | ".join(analysis_parts)
+        
+        # Trim if too long
+        if len(analysis.split()) * 1.3 > max_tokens:
+            analysis = await self._truncate_content(analysis, max_tokens)
+        
+        return analysis
+
+    async def _extract_urgency_indicators(self, story_state: DynamicStoryState, max_tokens: int) -> str:
+        """Extract indicators of what needs immediate attention."""
+        urgencies = []
+        
+        # Critical thread staleness
+        stagnant = story_state.get_stagnant_threads(staleness_threshold=5)
+        for thread in stagnant[:3]:  # Top 3 most urgent
+            chapters_stagnant = thread.chapters_since_advancement(story_state.current_chapter)
+            urgencies.append(f"{thread.title} stagnant {chapters_stagnant}ch")
+        
+        # High-investment threads needing advancement
+        active_threads = story_state.get_active_threads()
+        high_investment_stagnant = [
+            t for t in active_threads 
+            if t.reader_investment.value == 'high' and 
+            t.chapters_since_advancement(story_state.current_chapter) >= 3
+        ]
+        
+        for thread in high_investment_stagnant[:2]:
+            urgencies.append(f"HIGH-INVESTMENT: {thread.title} needs advancement")
+        
+        # Resolution opportunities
+        ready_threads = story_state.get_resolution_ready_threads(readiness_threshold=0.8)
+        for thread in ready_threads[:2]:
+            urgencies.append(f"RESOLUTION READY: {thread.title}")
+        
+        # Character development urgencies
+        chars_urgent = [
+            c for c in story_state.get_characters_needing_development()
+            if c.chapters_since_development(story_state.current_chapter) >= 6
+        ]
+        
+        for char in chars_urgent[:2]:
+            urgencies.append(f"CHARACTER: {char.name} needs development")
+        
+        # Reader expectation pressure
+        if story_state.reader_expectations.satisfaction_debt >= 0.7:
+            urgencies.append("CRITICAL: Reader satisfaction debt")
+        
+        # Narrative tension imbalance
+        if story_state.narrative_tension == story_state.NarrativeTension.BUILDING:
+            if len([t for t in active_threads if t.tension_level >= 7]) == 0:
+                urgencies.append("Need higher tension threads")
+        
+        # Combine urgencies
+        if not urgencies:
+            return "No critical urgencies identified"
+        
+        urgency_text = " | ".join(urgencies)
+        
+        # Trim if too long
+        if len(urgency_text.split()) * 1.3 > max_tokens:
+            urgency_text = await self._truncate_content(urgency_text, max_tokens)
+        
+        return urgency_text
+
+    async def _calculate_story_health(self, story_state: DynamicStoryState, max_tokens: int) -> str:
+        """Calculate overall story health metrics."""
+        health_metrics = []
+        
+        # Thread health
+        active_threads = story_state.get_active_threads()
+        if active_threads:
+            avg_tension = sum(t.tension_level for t in active_threads) / len(active_threads)
+            health_metrics.append(f"Avg tension: {avg_tension:.1f}")
+            
+            stagnant_ratio = len(story_state.get_stagnant_threads()) / len(active_threads)
+            if stagnant_ratio > 0.3:
+                health_metrics.append(f"Stagnancy: {stagnant_ratio:.0%} (HIGH)")
+            else:
+                health_metrics.append(f"Stagnancy: {stagnant_ratio:.0%}")
+        
+        # Character health
+        if story_state.character_arcs:
+            chars_needing_dev = len(story_state.get_characters_needing_development())
+            total_chars = len(story_state.character_arcs)
+            dev_ratio = chars_needing_dev / total_chars
+            health_metrics.append(f"Char dev needed: {dev_ratio:.0%}")
+        
+        # Reader satisfaction health
+        satisfaction_debt = story_state.reader_expectations.satisfaction_debt
+        if satisfaction_debt >= 0.8:
+            health_metrics.append("Reader satisfaction: CRITICAL")
+        elif satisfaction_debt >= 0.6:
+            health_metrics.append("Reader satisfaction: Poor")
+        elif satisfaction_debt <= 0.3:
+            health_metrics.append("Reader satisfaction: Good")
+        else:
+            health_metrics.append(f"Reader satisfaction: {satisfaction_debt:.1f}")
+        
+        # Momentum health
+        momentum = story_state.momentum_score
+        if momentum >= 0.8:
+            health_metrics.append("Momentum: Excellent")
+        elif momentum >= 0.6:
+            health_metrics.append("Momentum: Good")
+        elif momentum >= 0.4:
+            health_metrics.append("Momentum: Fair")
+        else:
+            health_metrics.append("Momentum: Poor")
+        
+        # World consistency health
+        consistency_issues = story_state.validate_consistency()
+        if len(consistency_issues) > 3:
+            health_metrics.append(f"Consistency: {len(consistency_issues)} issues")
+        elif len(consistency_issues) > 0:
+            health_metrics.append(f"Consistency: {len(consistency_issues)} minor issues")
+        else:
+            health_metrics.append("Consistency: Good")
+        
+        health_summary = " | ".join(health_metrics)
+        
+        # Trim if needed
+        if len(health_summary.split()) * 1.3 > max_tokens:
+            health_summary = await self._truncate_content(health_summary, max_tokens)
+        
+        return health_summary
+
+# Helper methods for context tools
+
+    async def _extractive_summarize(self, text: str, max_tokens: int) -> str:
+        """Extract most important sentences up to token limit."""
+        sentences = text.split('. ')
+        if not sentences:
+            return text
+        
+        # Score sentences by importance indicators
+        scored_sentences = []
+        importance_keywords = [
+            'protagonist', 'antagonist', 'conflict', 'tension', 'objective', 
+            'goal', 'obstacle', 'relationship', 'emotion', 'critical', 'important'
+        ]
+        
+        for i, sentence in enumerate(sentences):
+            score = 0
+            # Position score (earlier sentences often more important)
+            score += max(0, 10 - i)
+            
+            # Keyword score
+            for keyword in importance_keywords:
+                if keyword.lower() in sentence.lower():
+                    score += 5
+            
+            # Length penalty for very long sentences
+            if len(sentence.split()) > 30:
+                score -= 2
+                
+            scored_sentences.append((score, sentence))
+        
+        # Sort by score and select best sentences within token limit
+        scored_sentences.sort(reverse=True, key=lambda x: x[0])
+        selected = []
+        current_tokens = 0
+        
+        for score, sentence in scored_sentences:
+            sentence_tokens = len(sentence.split()) * 1.3
+            if current_tokens + sentence_tokens <= max_tokens:
+                selected.append(sentence)
+                current_tokens += sentence_tokens
+            else:
+                break
+        
+        return '. '.join(selected) + ('.' if selected else '')
+
+    async def _abstractive_summarize(self, text: str, max_tokens: int) -> str:
+        """Create abstract summary of key points."""
+        # Simple template-based abstractive summarization
+        # In production, this would use a dedicated summarization model
+        
+        lines = text.split('\n')
+        key_points = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Extract key information patterns
+            if 'Primary Goal:' in line:
+                key_points.append(line)
+            elif 'Active Threads:' in line:
+                key_points.append(line)
+            elif 'Characters:' in line:
+                key_points.append(line)
+            elif 'NEEDS PAYOFF' in line:
+                key_points.append(line)
+            elif line.startswith('Chapter') and ('|' in line):
+                key_points.append(line)
+        
+        summary = ' | '.join(key_points)
+        
+        # Trim if too long
+        if len(summary.split()) * 1.3 > max_tokens:
+            words = summary.split()
+            target_words = int(max_tokens / 1.3)
+            summary = ' '.join(words[:target_words]) + '...'
+        
+        return summary
+
+    async def _template_summarize(self, text: str, max_tokens: int) -> str:
+        """Use templates to create structured summaries."""
+        template_parts = []
+        
+        # Extract structured information
+        if 'Chapter' in text and '|' in text:
+            chapter_info = [line for line in text.split('\n') if 'Chapter' in line and '|' in line]
+            if chapter_info:
+                template_parts.append(f"Status: {chapter_info[0]}")
+        
+        if 'Active Threads:' in text:
+            threads = [line for line in text.split('\n') if 'Active Threads:' in line]
+            if threads:
+                template_parts.append(threads[0])
+        
+        if 'Characters:' in text:
+            characters = [line for line in text.split('\n') if 'Characters:' in line]
+            if characters:
+                template_parts.append(characters[0])
+        
+        return ' | '.join(template_parts) if template_parts else text[:max_tokens]
+
+    async def _truncate_content(self, content: str, max_tokens: int) -> str:
+        """Simple truncation with ellipsis."""
+        words = content.split()
+        if len(words) * 1.3 <= max_tokens:
+            return content
+        
+        target_words = int(max_tokens / 1.3) - 1
+        return ' '.join(words[:target_words]) + '...'
+
+    async def _selective_content_pruning(self, content: str, max_tokens: int) -> str:
+        """Remove less important content while preserving structure."""
+        lines = content.split('\n')
+        important_lines = []
+        optional_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Classify line importance
+            if any(pattern in line for pattern in ['===', 'Primary Goal:', 'Active Threads:', 'NEEDS PAYOFF']):
+                important_lines.append(line)
+            else:
+                optional_lines.append(line)
+        
+        # Start with important lines
+        result_lines = important_lines[:]
+        current_tokens = sum(len(line.split()) * 1.3 for line in result_lines)
+        
+        # Add optional lines if space permits
+        for line in optional_lines:
+            line_tokens = len(line.split()) * 1.3
+            if current_tokens + line_tokens <= max_tokens:
+                result_lines.append(line)
+                current_tokens += line_tokens
+        
+        return '\n'.join(result_lines)
+
+    async def _semantic_content_compression(self, content: str, max_tokens: int) -> str:
+        """Compress content while preserving semantic meaning."""
+        # Simplified semantic compression
+        lines = content.split('\n')
+        compressed_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Remove redundant words while preserving meaning
+            words = line.split()
+            filtered_words = []
+            
+            skip_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'very', 'quite', 'rather'}
+            
+            for word in words:
+                if word.lower() not in skip_words or len(filtered_words) == 0:
+                    filtered_words.append(word)
+            
+            compressed_line = ' '.join(filtered_words)
+            compressed_lines.append(compressed_line)
+        
+        compressed_content = '\n'.join(compressed_lines)
+        
+        # Final truncation if still too long
+        if len(compressed_content.split()) * 1.3 > max_tokens:
+            return await self._truncate_content(compressed_content, max_tokens)
+        
+        return compressed_content
+
+    async def _validate_story_context(self, context: str) -> bool:
+        """Validate story context section."""
+        required_elements = ['Chapter', 'Active Threads', 'Characters']
+        return any(element in context for element in required_elements)
+
+    async def _validate_objectives_context(self, context: str) -> bool:
+        """Validate objectives context section."""
+        return 'Primary Goal:' in context or 'Word Target:' in context
+
+    async def _validate_market_context(self, context: str) -> bool:
+        """Validate market intelligence context section."""
+        return len(context.strip()) > 0
+
+    async def _validate_feedback_context(self, context: str) -> bool:
+        """Validate feedback context section."""
+        return len(context.strip()) > 0
+
+    async def _preserve_critical_sections(self, context: str, target_tokens: int) -> str:
+        """Preserve most critical sections when trimming."""
+        sections = context.split('=== ')
+        if len(sections) <= 1:
+            return await self._truncate_content(context, target_tokens)
+        
+        critical_sections = []
+        optional_sections = []
+        
+        for section in sections[1:]:  # Skip first empty split
+            section = '=== ' + section
+            if any(critical in section for critical in ['STORY CONTEXT', 'CHAPTER OBJECTIVES']):
+                critical_sections.append(section)
+            else:
+                optional_sections.append(section)
+        
+        # Start with critical sections
+        result = '\n\n'.join(critical_sections)
+        current_tokens = len(result.split()) * 1.3
+        
+        # Add optional sections if space permits
+        for section in optional_sections:
+            section_tokens = len(section.split()) * 1.3
+            if current_tokens + section_tokens <= target_tokens:
+                result += '\n\n' + section
+                current_tokens += section_tokens
+        
+        return result
+
+    async def _smart_content_truncation(self, content: str, target_tokens: int) -> str:
+        """Smart truncation that preserves sentence boundaries."""
+        sentences = content.split('. ')
+        if not sentences:
+            return content
+        
+        result_sentences = []
+        current_tokens = 0
+        
+        for sentence in sentences:
+            sentence_tokens = len(sentence.split()) * 1.3
+            if current_tokens + sentence_tokens <= target_tokens:
+                result_sentences.append(sentence)
+                current_tokens += sentence_tokens
+            else:
+                break
+        
+        result = '. '.join(result_sentences)
+        if result and not result.endswith('.'):
+            result += '.'
+        
+        return result
+
+    async def _importance_based_trimming(self, content: str, target_tokens: int) -> str:
+        """Trim content based on importance scoring."""
+        lines = content.split('\n')
+        scored_lines = []
+        
+        for line in lines:
+            score = 0
+            line_lower = line.lower()
+            
+            # Section headers get high score
+            if line.startswith('==='):
+                score += 20
+            
+            # Critical information patterns
+            importance_patterns = [
+                ('primary goal', 15), ('active threads', 12), ('needs payoff', 10),
+                ('chapter', 8), ('characters', 7), ('objective', 6),
+                ('tension', 5), ('constraint', 3)
+            ]
+            
+            for pattern, points in importance_patterns:
+                if pattern in line_lower:
+                    score += points
+            
+            scored_lines.append((score, line))
+        
+        # Sort by importance and select within token limit
+        scored_lines.sort(reverse=True, key=lambda x: x[0])
+        selected_lines = []
+        current_tokens = 0
+        
+        for score, line in scored_lines:
+            line_tokens = len(line.split()) * 1.3
+            if current_tokens + line_tokens <= target_tokens:
+                selected_lines.append(line)
+                current_tokens += line_tokens
+        
+        return '\n'.join(selected_lines)
+
+    async def _cluster_and_compress(self, content: str, target_tokens: int) -> str:
+        """Cluster related content and compress."""
+        # Simple clustering by section headers
+        sections = {}
+        current_section = 'default'
+        
+        for line in content.split('\n'):
+            if line.startswith('==='):
+                current_section = line.strip()
+                sections[current_section] = []
+            else:
+                if current_section not in sections:
+                    sections[current_section] = []
+                sections[current_section].append(line)
+        
+        # Compress each section proportionally
+        total_tokens_available = target_tokens
+        compressed_sections = []
+        
+        for section_header, section_lines in sections.items():
+            section_content = '\n'.join(section_lines)
+            section_tokens = len(section_content.split()) * 1.3
+            
+            if section_header in self._context_prioritizer:
+                section_weight = self._context_prioritizer[section_header.lower().replace('=', '').strip().replace(' ', '_')]['weight']
+                allocated_tokens = int(total_tokens_available * section_weight)
+            else:
+                allocated_tokens = int(total_tokens_available * 0.1)
+            
+            if section_tokens > allocated_tokens:
+                compressed_content = await self._truncate_content(section_content, allocated_tokens)
+            else:
+                compressed_content = section_content
+            
+            if section_header.startswith('==='):
+                compressed_sections.append(section_header)
+            compressed_sections.append(compressed_content)
+        
+        return '\n'.join(compressed_sections)
+
+
+
+
+
+
+
+
+
+
+    async def _format_story_context(self, story_state: DynamicStoryState, max_tokens: int) -> str:
+        """Format story state into structured context for generation."""
+        
+        # Use the built-in contextual summary as base
+        base_summary = story_state.get_contextual_summary(max_tokens=int(max_tokens * 0.8))
+        
+        # If base summary fits, enhance it with additional context
+        base_tokens = len(base_summary.split()) * 1.3
+        if base_tokens >= max_tokens:
+            return base_summary
+        
+        # Add additional context elements with remaining token budget
+        remaining_tokens = max_tokens - base_tokens
+        context_sections = []
+        
+        # Start with base summary
+        context_sections.append(base_summary)
+        
+        # Add critical story analysis if tokens available
+        if remaining_tokens > 100:
+            analysis_tokens = min(remaining_tokens * 0.4, 200)
+            story_analysis = await self._create_story_analysis(story_state, int(analysis_tokens))
+            if story_analysis:
+                context_sections.append(f"\nSTORY ANALYSIS: {story_analysis}")
+                remaining_tokens -= len(story_analysis.split()) * 1.3
+        
+        # Add urgency indicators if tokens available
+        if remaining_tokens > 50:
+            urgency_tokens = min(remaining_tokens * 0.3, 100)
+            urgency_info = await self._extract_urgency_indicators(story_state, int(urgency_tokens))
+            if urgency_info:
+                context_sections.append(f"\nURGENCY INDICATORS: {urgency_info}")
+                remaining_tokens -= len(urgency_info.split()) * 1.3
+        
+        # Add story health metrics if tokens available
+        if remaining_tokens > 30:
+            health_tokens = min(remaining_tokens, 80)
+            health_info = await self._calculate_story_health(story_state, int(health_tokens))
+            if health_info:
+                context_sections.append(f"\nSTORY HEALTH: {health_info}")
+        
+        # Combine all sections
+        full_context = "".join(context_sections)
+        
+        # Final validation and trimming
+        if len(full_context.split()) * 1.3 > max_tokens:
+            full_context = await self._truncate_content(full_context, max_tokens)
+        
+        return full_context
+
+
+    async def _extractive_summarize(self, text: str, max_tokens: int) -> str:
+        """Extract most important sentences up to token limit."""
+        sentences = text.split('. ')
+        if not sentences:
+            return text
+        
+        # Score sentences by importance indicators
+        scored_sentences = []
+        importance_keywords = [
+            'protagonist', 'antagonist', 'conflict', 'tension', 'objective', 
+            'goal', 'obstacle', 'relationship', 'emotion', 'critical', 'important'
+        ]
+        
+        for i, sentence in enumerate(sentences):
+            score = 0
+            # Position score (earlier sentences often more important)
+            score += max(0, 10 - i)
+            
+            # Keyword score
+            for keyword in importance_keywords:
+                if keyword.lower() in sentence.lower():
+                    score += 5
+            
+            # Length penalty for very long sentences
+            if len(sentence.split()) > 30:
+                score -= 2
+                
+            scored_sentences.append((score, sentence))
+        
+        # Sort by score and select best sentences within token limit
+        scored_sentences.sort(reverse=True, key=lambda x: x[0])
+        selected = []
+        current_tokens = 0
+        
+        for score, sentence in scored_sentences:
+            sentence_tokens = len(sentence.split()) * 1.3
+            if current_tokens + sentence_tokens <= max_tokens:
+                selected.append(sentence)
+                current_tokens += sentence_tokens
+            else:
+                break
+        
+        return '. '.join(selected) + ('.' if selected else '')
+
+    async def _abstractive_summarize(self, text: str, max_tokens: int) -> str:
+        """Create abstract summary of key points."""
+        # Simple template-based abstractive summarization
+        # In production, this would use a dedicated summarization model
+        
+        lines = text.split('\n')
+        key_points = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Extract key information patterns
+            if 'Primary Goal:' in line:
+                key_points.append(line)
+            elif 'Active Threads:' in line:
+                key_points.append(line)
+            elif 'Characters:' in line:
+                key_points.append(line)
+            elif 'NEEDS PAYOFF' in line:
+                key_points.append(line)
+            elif line.startswith('Chapter') and ('|' in line):
+                key_points.append(line)
+        
+        summary = ' | '.join(key_points)
+        
+        # Trim if too long
+        if len(summary.split()) * 1.3 > max_tokens:
+            words = summary.split()
+            target_words = int(max_tokens / 1.3)
+            summary = ' '.join(words[:target_words]) + '...'
+        
+        return summary
+
+    async def _template_summarize(self, text: str, max_tokens: int) -> str:
+        """Use templates to create structured summaries."""
+        template_parts = []
+        
+        # Extract structured information
+        if 'Chapter' in text and '|' in text:
+            chapter_info = [line for line in text.split('\n') if 'Chapter' in line and '|' in line]
+            if chapter_info:
+                template_parts.append(f"Status: {chapter_info[0]}")
+        
+        if 'Active Threads:' in text:
+            threads = [line for line in text.split('\n') if 'Active Threads:' in line]
+            if threads:
+                template_parts.append(threads[0])
+        
+        if 'Characters:' in text:
+            characters = [line for line in text.split('\n') if 'Characters:' in line]
+            if characters:
+                template_parts.append(characters[0])
+        
+        return ' | '.join(template_parts) if template_parts else text[:max_tokens]
+
+    async def _truncate_content(self, content: str, max_tokens: int) -> str:
+        """Simple truncation with ellipsis."""
+        words = content.split()
+        if len(words) * 1.3 <= max_tokens:
+            return content
+        
+        target_words = int(max_tokens / 1.3) - 1
+        return ' '.join(words[:target_words]) + '...'
+
+    async def _selective_content_pruning(self, content: str, max_tokens: int) -> str:
+        """Remove less important content while preserving structure."""
+        lines = content.split('\n')
+        important_lines = []
+        optional_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Classify line importance
+            if any(pattern in line for pattern in ['===', 'Primary Goal:', 'Active Threads:', 'NEEDS PAYOFF']):
+                important_lines.append(line)
+            else:
+                optional_lines.append(line)
+        
+        # Start with important lines
+        result_lines = important_lines[:]
+        current_tokens = sum(len(line.split()) * 1.3 for line in result_lines)
+        
+        # Add optional lines if space permits
+        for line in optional_lines:
+            line_tokens = len(line.split()) * 1.3
+            if current_tokens + line_tokens <= max_tokens:
+                result_lines.append(line)
+                current_tokens += line_tokens
+        
+        return '\n'.join(result_lines)
+
+    async def _semantic_content_compression(self, content: str, max_tokens: int) -> str:
+        """Compress content while preserving semantic meaning."""
+        # Simplified semantic compression
+        lines = content.split('\n')
+        compressed_lines = []
+        
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Remove redundant words while preserving meaning
+            words = line.split()
+            filtered_words = []
+            
+            skip_words = {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'very', 'quite', 'rather'}
+            
+            for word in words:
+                if word.lower() not in skip_words or len(filtered_words) == 0:
+                    filtered_words.append(word)
+            
+            compressed_line = ' '.join(filtered_words)
+            compressed_lines.append(compressed_line)
+        
+        compressed_content = '\n'.join(compressed_lines)
+        
+        # Final truncation if still too long
+        if len(compressed_content.split()) * 1.3 > max_tokens:
+            return await self._truncate_content(compressed_content, max_tokens)
+        
+        return compressed_content
+
+    async def _validate_story_context(self, context: str) -> bool:
+        """Validate story context section."""
+        required_elements = ['Chapter', 'Active Threads', 'Characters']
+        return any(element in context for element in required_elements)
+
+    async def _validate_objectives_context(self, context: str) -> bool:
+        """Validate objectives context section."""
+        return 'Primary Goal:' in context or 'Word Target:' in context
+
+    async def _validate_market_context(self, context: str) -> bool:
+        """Validate market intelligence context section."""
+        return len(context.strip()) > 0
+
+    async def _validate_feedback_context(self, context: str) -> bool:
+        """Validate feedback context section."""
+        return len(context.strip()) > 0
+
+    async def _preserve_critical_sections(self, context: str, target_tokens: int) -> str:
+        """Preserve most critical sections when trimming."""
+        sections = context.split('=== ')
+        if len(sections) <= 1:
+            return await self._truncate_content(context, target_tokens)
+        
+        critical_sections = []
+        optional_sections = []
+        
+        for section in sections[1:]:  # Skip first empty split
+            section = '=== ' + section
+            if any(critical in section for critical in ['STORY CONTEXT', 'CHAPTER OBJECTIVES']):
+                critical_sections.append(section)
+            else:
+                optional_sections.append(section)
+        
+        # Start with critical sections
+        result = '\n\n'.join(critical_sections)
+        current_tokens = len(result.split()) * 1.3
+        
+        # Add optional sections if space permits
+        for section in optional_sections:
+            section_tokens = len(section.split()) * 1.3
+            if current_tokens + section_tokens <= target_tokens:
+                result += '\n\n' + section
+                current_tokens += section_tokens
+        
+        return result
+
+    async def _smart_content_truncation(self, content: str, target_tokens: int) -> str:
+        """Smart truncation that preserves sentence boundaries."""
+        sentences = content.split('. ')
+        if not sentences:
+            return content
+        
+        result_sentences = []
+        current_tokens = 0
+        
+        for sentence in sentences:
+            sentence_tokens = len(sentence.split()) * 1.3
+            if current_tokens + sentence_tokens <= target_tokens:
+                result_sentences.append(sentence)
+                current_tokens += sentence_tokens
+            else:
+                break
+        
+        result = '. '.join(result_sentences)
+        if result and not result.endswith('.'):
+            result += '.'
+        
+        return result
+
+    async def _importance_based_trimming(self, content: str, target_tokens: int) -> str:
+        """Trim content based on importance scoring."""
+        lines = content.split('\n')
+        scored_lines = []
+        
+        for line in lines:
+            score = 0
+            line_lower = line.lower()
+            
+            # Section headers get high score
+            if line.startswith('==='):
+                score += 20
+            
+            # Critical information patterns
+            importance_patterns = [
+                ('primary goal', 15), ('active threads', 12), ('needs payoff', 10),
+                ('chapter', 8), ('characters', 7), ('objective', 6),
+                ('tension', 5), ('constraint', 3)
+            ]
+            
+            for pattern, points in importance_patterns:
+                if pattern in line_lower:
+                    score += points
+            
+            scored_lines.append((score, line))
+        
+        # Sort by importance and select within token limit
+        scored_lines.sort(reverse=True, key=lambda x: x[0])
+        selected_lines = []
+        current_tokens = 0
+        
+        for score, line in scored_lines:
+            line_tokens = len(line.split()) * 1.3
+            if current_tokens + line_tokens <= target_tokens:
+                selected_lines.append(line)
+                current_tokens += line_tokens
+        
+        return '\n'.join(selected_lines)
+
+    async def _cluster_and_compress(self, content: str, target_tokens: int) -> str:
+        """Cluster related content and compress."""
+        # Simple clustering by section headers
+        sections = {}
+        current_section = 'default'
+        
+        for line in content.split('\n'):
+            if line.startswith('==='):
+                current_section = line.strip()
+                sections[current_section] = []
+            else:
+                if current_section not in sections:
+                    sections[current_section] = []
+                sections[current_section].append(line)
+        
+        # Compress each section proportionally
+        total_tokens_available = target_tokens
+        compressed_sections = []
+        
+        for section_header, section_lines in sections.items():
+            section_content = '\n'.join(section_lines)
+            section_tokens = len(section_content.split()) * 1.3
+            
+            if section_header in self._context_prioritizer:
+                section_weight = self._context_prioritizer[section_header.lower().replace('=', '').strip().replace(' ', '_')]['weight']
+                allocated_tokens = int(total_tokens_available * section_weight)
+            else:
+                allocated_tokens = int(total_tokens_available * 0.1)
+            
+            if section_tokens > allocated_tokens:
+                compressed_content = await self._truncate_content(section_content, allocated_tokens)
+            else:
+                compressed_content = section_content
+            
+            if section_header.startswith('==='):
+                compressed_sections.append(section_header)
+            compressed_sections.append(compressed_content)
+        
+        return '\n'.join(compressed_sections)
     
     async def _assemble_generation_context(self, input_data: ChapterGeneratorInput, 
                                           generation_id: str) -> str:
@@ -969,7 +1970,7 @@ class ChapterGenerator(BaseComponent[ChapterGeneratorInput, ChapterGeneratorOutp
     
     async def _test_llm_connection(self) -> bool:
         """Test LLM client connectivity."""
-        return self._llm_client is not None and self._llm_client.get('initialized', False)
+        return self._llm_client is not None
     
     async def _test_context_assembly(self) -> str:
         """Test context assembly functionality."""
