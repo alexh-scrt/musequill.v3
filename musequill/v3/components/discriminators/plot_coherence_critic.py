@@ -4,11 +4,12 @@ Plot Coherence Critic Component
 Implements story logic evaluation, character consistency checking, and plot
 advancement analysis for the adversarial system discriminator layer.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
-
+from pydantic import BaseModel, Field
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError
 )

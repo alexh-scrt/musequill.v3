@@ -4,6 +4,7 @@ Pipeline Integration with Auto-Research
 This module demonstrates how to integrate the enhanced researcher
 into your existing pipeline components with automatic research triggers.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import logging

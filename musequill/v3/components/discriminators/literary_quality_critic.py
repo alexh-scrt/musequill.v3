@@ -4,6 +4,7 @@ Literary Quality Critic Component
 Implements prose quality evaluation, originality assessment, character voice analysis,
 and pacing evaluation for the adversarial system discriminator layer.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import re

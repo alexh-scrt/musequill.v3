@@ -4,6 +4,7 @@ Literary Quality Assessment Model
 Evaluates prose quality, language freshness, character voice consistency,
 and pacing for the Literary Quality Critic in the adversarial system.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 from pydantic import BaseModel, Field, computed_field
 from typing import List, Dict, Optional, Any, Tuple

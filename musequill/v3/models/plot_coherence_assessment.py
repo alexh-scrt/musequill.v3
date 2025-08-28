@@ -4,6 +4,7 @@ Plot Coherence Assessment Model
 Evaluates story logic, character consistency, plot advancement, and narrative
 continuity for the Plot Coherence Critic in the adversarial system.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 from pydantic import BaseModel, Field, computed_field
 from typing import List, Dict, Optional, Any

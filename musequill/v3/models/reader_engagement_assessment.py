@@ -4,6 +4,7 @@ Reader Engagement Assessment Model
 Evaluates emotional journey effectiveness, question/answer balance, satisfaction
 potential, and cliffhanger quality for the Reader Engagement Critic.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 from pydantic import BaseModel, Field, computed_field
 from typing import List, Dict, Optional, Tuple

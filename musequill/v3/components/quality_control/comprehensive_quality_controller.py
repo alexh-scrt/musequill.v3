@@ -5,12 +5,13 @@ Implements unified quality control that aggregates critic assessments, applies
 acceptance/rejection logic, manages revision cycles, and provides comprehensive
 quality feedback for the adversarial system.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 from typing import List, Dict, Any, Optional, Tuple
 from datetime import datetime
 from enum import Enum
-
+from pydantic import BaseModel, Field, computed_field
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError
 )

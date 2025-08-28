@@ -4,6 +4,7 @@ Reader Engagement Critic Component
 Implements reader engagement evaluation, commercial viability assessment,
 and reader satisfaction prediction for the adversarial system discriminator layer.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import re

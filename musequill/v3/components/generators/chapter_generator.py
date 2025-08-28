@@ -4,6 +4,7 @@ Chapter Generator Component
 Implements the Generator component of the adversarial system, creating multiple
 chapter variants based on story state, objectives, and market intelligence.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import json

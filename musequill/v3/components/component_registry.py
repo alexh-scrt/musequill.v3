@@ -4,8 +4,10 @@ Component Registry Setup Utility - COMPLETE VERSION
 Provides functions to register all components with the global component registry
 and create proper component configurations.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 from typing import Dict, Any
+from datetime import datetime
 from musequill.v3.components.base.component_interface import (
     component_registry, ComponentConfiguration, ComponentType
 )

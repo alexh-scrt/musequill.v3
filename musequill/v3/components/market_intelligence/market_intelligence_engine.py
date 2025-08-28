@@ -4,6 +4,7 @@ Market Intelligence Engine Component
 Implements market research, trend analysis, and commercial viability assessment
 using Tavily for real-time market intelligence gathering and analysis.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import json

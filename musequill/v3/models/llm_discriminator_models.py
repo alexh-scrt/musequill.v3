@@ -8,6 +8,7 @@ from datetime import datetime
 from enum import Enum
 from pydantic import BaseModel, Field
 
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 # =============================================================================
 # Enhanced Critique Enums
@@ -617,4 +618,42 @@ def create_sample_llm_critique() -> ComprehensiveLLMCritique:
 
 if __name__ == "__main__":
     # Create and display sample critique
-    sample_critique = create_sample_llm_critique
+    sample_critique = create_sample_llm_critique()
+    
+    print("🎭 Sample LLM Discriminator Critique")
+    print("=" * 50)
+    print(f"Overall Score: {sample_critique.overall_score:.2f}")
+    print(f"Confidence Level: {sample_critique.confidence_level.value}")
+    print(f"Publication Readiness: {sample_critique.publication_readiness:.2f}")
+    print(f"Revision Urgency: {sample_critique.revision_urgency}")
+    
+    print(f"\nExecutive Summary: {sample_critique.executive_summary}")
+    
+    print(f"\nMarket Assessment Score: {sample_critique.market_assessment.overall_appeal_score:.2f}")
+    print(f"Commercial Potential: {sample_critique.market_assessment.commercial_potential}")
+    
+    print("\nDimension Analysis:")
+    for dimension, analysis in sample_critique.dimension_analyses.items():
+        print(f"  {dimension.value}: {analysis.score:.2f} (confidence: {analysis.confidence:.2f})")
+    
+    print(f"\nAnalysis completed in {sample_critique.critique_metadata.analysis_duration_seconds:.1f} seconds")
+    print(f"Tokens consumed: {sample_critique.critique_metadata.tokens_consumed}")
+    
+    # Demonstrate adaptive configuration
+    print("\n📊 Creating Adaptive Configuration...")
+    adaptive_config = AdaptiveCritiqueConfiguration(
+        base_scoring_strictness=0.75,
+        dimension_weights={
+            CritiqueDimension.PLOT_COHERENCE: 0.2,
+            CritiqueDimension.CHARACTER_DEVELOPMENT: 0.25,
+            CritiqueDimension.PROSE_QUALITY: 0.2,
+            CritiqueDimension.MARKET_APPEAL: 0.15,
+            CritiqueDimension.PACING: 0.2
+        },
+        learned_patterns=[],
+        adaptation_rate=0.1,
+        context_sensitivity={"genre": "thriller", "target_audience": "adult"},
+        market_alignment_factor=0.3
+    )
+    
+    print("✅ Enhanced models and configurations ready for integration!")

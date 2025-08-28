@@ -4,6 +4,7 @@ LLM Discriminator Component
 Implements LLM-based content discrimination and critique for the adversarial system.
 Uses Large Language Model to provide comprehensive literary analysis and feedback.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import json

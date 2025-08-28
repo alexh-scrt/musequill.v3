@@ -4,6 +4,7 @@ Enhanced Pipeline Researcher Integration
 This module provides on-demand web search and data extraction capabilities
 that can be integrated into any pipeline component for real-time research.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import json

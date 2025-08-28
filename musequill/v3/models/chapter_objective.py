@@ -4,6 +4,7 @@ Chapter Objective Model
 Defines specific, measurable objectives for individual chapter generation
 including plot advancement, character development, and reader engagement goals.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 from pydantic import BaseModel, Field, field_validator
 from typing import Dict, List, Optional
