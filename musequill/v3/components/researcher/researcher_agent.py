@@ -1,18 +1,9 @@
 """
-Researcher Agent
+Refactored Researcher Component
 
-Executes research queries using Tavily web search and stores results in Chroma vector database.
-Processes and chunks content with quality filtering and deduplication.
-
-Key Features:
-- Web search using Tavily API with advanced search capabilities
-- Content processing with intelligent chunking and quality filtering
-- Vector storage in hosted Chroma database with comprehensive metadata
-- Concurrent query processing with rate limiting and retry logic
-- Content deduplication and similarity filtering
-- Source quality assessment and domain filtering
-- Comprehensive error handling and monitoring
-- Ollama embeddings integration for local embeddings generation
+Implements the researcher functionality using the standardized component interface.
+Uses the existing model definitions from musequill/v3/models/researcher_agent_model.py
+and configuration from musequill.services.backend.researcher.
 """
 
 import asyncio
@@ -23,54 +14,68 @@ from datetime import datetime, timezone
 from typing import Dict, List, Any, Optional, Tuple, Set, cast, Iterable
 from urllib.parse import urlparse
 from uuid import uuid4
-from dataclasses import dataclass
 import traceback
 import logging
 from hashlib import sha256
+
 import chromadb
 from chromadb.errors import NotFoundError
-from chromadb.config import Settings
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_ollama import OllamaEmbeddings  # Changed from OpenAI to Ollama
+from langchain_ollama import OllamaEmbeddings
 from tavily import TavilyClient
 from difflib import SequenceMatcher
-if __name__ == '__main__':
-    import sys
-    from pathlib import Path
-    project_root = Path(__name__).parent.parent.parent.parent.parent.parent
-    sys.path.insert(0, str(project_root))
-    current_path = Path(__name__).parent
-    sys.path.insert(1, str(current_path))
+from pydantic import BaseModel, Field
 
-from musequill.services.backend.researcher import (
-    ResearcherConfig,
-    ResearchQuery,
-    QueryStatus,
-    ResearchResults,
-    SearchResult,
-    ProcessedChunk
+from musequill.v3.components.base.component_interface import (
+    BaseComponent, ComponentConfiguration, ComponentType, ComponentError
 )
 
+# Import the existing model definitions
+from musequill.v3.models.researcher_agent_model import (
+    QueryStatus, SearchResult, ProcessedChunk, ResearchResults, ResearchQuery
+)
+
+# Import the existing configuration (adjust path as needed)
+from .researcher_agent_config import ResearcherConfig
 
 logger = logging.getLogger(__name__)
 
 
-class ResearcherAgent:
+# Input/Output Models for the Component Interface
+class ResearcherInput(BaseModel):
+    """Input model for researcher component."""
+    research_id: str = Field(description="Unique identifier for the research session")
+    queries: List[ResearchQuery] = Field(description="List of research queries to execute")
+    force_refresh: bool = Field(default=False, description="Force refresh of cached results")
+
+
+class ResearcherOutput(BaseModel):
+    """Output model for researcher component."""
+    research_id: str = Field(description="Research session identifier")
+    updated_queries: List[ResearchQuery] = Field(description="Updated queries with results")
+    total_chunks: int = Field(description="Total chunks stored")
+    total_sources: int = Field(description="Total sources processed")
+    stats: Dict[str, Any] = Field(description="Execution statistics")
+    chroma_storage_info: Dict[str, Any] = Field(description="ChromaDB storage information")
+    error: Optional[str] = Field(default=None, description="Error message if execution failed")
+
+
+class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, ResearcherConfig]):
     """
-    Researcher Agent that executes research queries and stores results in vector database.
+    Researcher component implementing the standardized component interface.
+    
+    Uses existing models from musequill/v3/models/researcher_agent_model.py and
+    configuration from musequill.services.backend.researcher.
     """
     
-    def __init__(self, config: Optional[ResearcherConfig] = None):
-        if not config:
-            config = ResearcherConfig()
-        
-        self.config = config
+    def __init__(self, config: ComponentConfiguration[ResearcherConfig]):
+        super().__init__(config)
         
         # Initialize clients
         self.tavily_client: Optional[TavilyClient] = None
         self.chroma_client: Optional[chromadb.HttpClient] = None
         self.chroma_collection = None
-        self.embeddings: Optional[OllamaEmbeddings] = None  # Changed type annotation
+        self.embeddings: Optional[OllamaEmbeddings] = None
         self.text_splitter: Optional[RecursiveCharacterTextSplitter] = None
         
         # Content tracking for deduplication
@@ -87,86 +92,185 @@ class ResearcherAgent:
             'low_quality_filtered': 0,
             'processing_start_time': None
         }
-        
-        self._initialize_components()
-        
-        logger.info("Researcher Agent initialized with Ollama embeddings")
     
-    def _initialize_components(self) -> None:
-        """Initialize all required components."""
+    async def initialize(self) -> bool:
+        """Initialize the researcher component."""
         try:
             # Initialize Tavily client
-            if self.config.tavily_api_key:
-                self.tavily_client = TavilyClient(api_key=self.config.tavily_api_key)
-                logger.info("✅  Tavily client initialized")
-            else:
-                logger.error("🛑  Tavily API key not provided")
-                raise ValueError("Tavily API key is required")
+            if not self.config.specific_config.tavily_api_key:
+                logger.error("Tavily API key not provided")
+                return False
             
-            # Initialize Chroma client
+            self.tavily_client = TavilyClient(api_key=self.config.specific_config.tavily_api_key)
+            
+            # Initialize ChromaDB client
             self.chroma_client = chromadb.HttpClient(
-                host=self.config.chroma_host,
-                port=self.config.chroma_port,
-                settings=Settings(
-                    chroma_server_authn_credentials=None,
-                    chroma_server_authn_provider=None
-                )
+                host=self.config.specific_config.chroma_host,
+                port=self.config.specific_config.chroma_port
             )
             
-            # Handle collection creation/recreation with dimension check
-            self.chroma_collection = self._get_or_create_collection_safe(self.config, drop_if_exists=True)
-
-            ollama_base_url = getattr(self.config, 'ollama_base_url', 'http://localhost:11434')
-            embedding_model = getattr(self.config, 'embedding_model', 'nomic-embed-text')
+            # Get or create collection (using the same approach as original)
+            self.chroma_collection = self._get_or_create_collection_safe(
+                self.config.specific_config
+            )
             
+            # Initialize Ollama embeddings
             self.embeddings = OllamaEmbeddings(
-                model=embedding_model,
-                base_url=ollama_base_url
+                base_url=self.config.specific_config.ollama_base_url,
+                model=getattr(self.config.specific_config, 'embedding_model', 'nomic-embed-text')
             )
             
-            logger.info(f"✅  Ollama embeddings initialized with model: {embedding_model}")
-            
-            # Initialize other components
-            # from langchain.text_splitter import RecursiveCharacterTextSplitter
+            # Initialize text splitter
             self.text_splitter = RecursiveCharacterTextSplitter(
-                chunk_size=self.config.chunk_size,
-                chunk_overlap=self.config.chunk_overlap,
+                chunk_size=self.config.specific_config.chunk_size,
+                chunk_overlap=self.config.specific_config.chunk_overlap,
                 separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""]
             )
             
-            logger.info("✅  All components initialized successfully")
+            self.stats['processing_start_time'] = time.time()
+            logger.info(f"Researcher component {self.config.component_id} initialized successfully")
+            return True
             
         except Exception as e:
-            logger.error(f"🛑  Failed to initialize components: {e}")
-            raise
-
-    def _get_or_create_collection_safe(self, config: ResearcherConfig, drop_if_exists:bool = False):
-        """
-        Safely get or create ChromaDB collection, handling dimension mismatches.
-        """
+            logger.error(f"Failed to initialize researcher component: {e}")
+            logger.error(traceback.format_exc())
+            return False
+    
+    async def process(self, input_data: ResearcherInput) -> ResearcherOutput:
+        """Process research queries and return results."""
+        try:
+            logger.info(f"Starting research for {len(input_data.queries)} queries")
+            
+            # Execute research queries
+            results = await self._execute_queries_concurrently(
+                input_data.queries, 
+                input_data.research_id
+            )
+            
+            # Update query statuses
+            updated_queries = self._update_query_statuses(input_data.queries, results)
+            
+            # Calculate totals
+            total_chunks = sum(
+                sum(r.total_chunks_stored for r in result_list) 
+                for result_list in results.values()
+            )
+            total_sources = sum(
+                sum(r.total_sources for r in result_list)
+                for result_list in results.values()
+            )
+            
+            # Get storage info
+            storage_info = self._get_chroma_storage_info(input_data.research_id)
+            
+            return ResearcherOutput(
+                research_id=input_data.research_id,
+                updated_queries=updated_queries,
+                total_chunks=total_chunks,
+                total_sources=total_sources,
+                stats=self.get_current_stats(),
+                chroma_storage_info=storage_info
+            )
+            
+        except Exception as e:
+            logger.error(f"Research execution failed: {e}")
+            logger.error(traceback.format_exc())
+            
+            # Mark all queries as failed
+            failed_queries = self._mark_queries_failed(input_data.queries, str(e))
+            
+            return ResearcherOutput(
+                research_id=input_data.research_id,
+                updated_queries=failed_queries,
+                total_chunks=0,
+                total_sources=0,
+                stats=self.get_current_stats(),
+                chroma_storage_info=self._get_chroma_storage_info(input_data.research_id),
+                error=str(e)
+            )
+    
+    async def health_check(self) -> bool:
+        """Perform health check on the researcher component."""
+        try:
+            # Check Tavily client
+            if not self.tavily_client:
+                return False
+            
+            # Check ChromaDB connection
+            if not self.chroma_client or not self.chroma_collection:
+                return False
+            
+            # Try a simple ChromaDB operation
+            try:
+                self.chroma_collection.count()
+            except Exception:
+                return False
+            
+            # Check Ollama embeddings
+            if not self.embeddings:
+                return False
+            
+            # Try a simple embedding operation
+            try:
+                await self.embeddings.aembed_query("health check")
+            except Exception:
+                return False
+            
+            return True
+            
+        except Exception:
+            return False
+    
+    async def cleanup(self) -> bool:
+        """Cleanup researcher component resources."""
+        try:
+            # Close connections if needed
+            self.tavily_client = None
+            self.chroma_client = None
+            self.chroma_collection = None
+            self.embeddings = None
+            self.text_splitter = None
+            
+            # Clear tracking sets
+            self.content_hashes.clear()
+            self.processed_urls.clear()
+            
+            logger.info(f"Researcher component {self.config.component_id} cleaned up successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Failed to cleanup researcher component: {e}")
+            return False
+    
+    # Helper method for collection management (from original implementation)
+    def _get_or_create_collection_safe(self, config: ResearcherConfig, drop_if_exists: bool = False):
+        """Safely get or create ChromaDB collection, handling dimension mismatches."""
         collection_name = config.chroma_collection_name
         expected_embedding_model = getattr(config, 'embedding_model', 'nomic-embed-text')
+        
         # Get expected dimensions for current model
         model_dimensions = {
             'nomic-embed-text': 768,
             'mxbai-embed-large': 1024,
             'all-minilm': 384,
-            'text-embedding-ada-002': 1536,  # OpenAI model
+            'text-embedding-ada-002': 1536,
             'text-embedding-3-small': 1536,
             'text-embedding-3-large': 3072
         }
         
         try:
-            # Try to get existing 
+            # Try to get existing collection
             if drop_if_exists:
-                self.chroma_client.delete_collection(name=collection_name)
-
+                try:
+                    self.chroma_client.delete_collection(name=collection_name)
+                except:
+                    pass  # Collection didn't exist
+            
             collection = self.chroma_client.get_collection(name=collection_name)
             
             # Check if the collection metadata indicates a different embedding model
             collection_metadata = collection.metadata or {}
             stored_model = collection_metadata.get('embedding_model', 'unknown')
-            
             
             expected_dims = model_dimensions.get(expected_embedding_model, 768)
             stored_dims = model_dimensions.get(stored_model, None)
@@ -185,206 +289,74 @@ class ResearcherAgent:
             
             return collection
             
-        except Exception or NotFoundError as e:
+        except (Exception, NotFoundError):
             # Collection doesn't exist, create new one
-            logger.info(f"Creating new collection '{collection_name}': {e}")
+            logger.info(f"Creating new collection '{collection_name}'")
             expected_dims = model_dimensions.get(expected_embedding_model, 768)
             return self._create_new_collection(config, expected_embedding_model, expected_dims)
     
     def _create_new_collection(self, config: ResearcherConfig, embedding_model: str, dimensions: int):
         """Create a new ChromaDB collection with proper metadata."""
-        collection = self.chroma_client.create_collection(
-            name=config.chroma_collection_name,
-            metadata={
-                "description": "Research materials for book writing",
-                "embedding_model": embedding_model,
-                "embedding_dimensions": dimensions,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-                "migration_from": "openai_to_local" if dimensions == 768 else "new_collection"
-            }
-        )
-        logger.info(f"Created new collection '{config.chroma_collection_name}' "
-                   f"for {embedding_model} ({dimensions} dimensions)")
-        return collection
-
-
-
-    async def execute_research(self, research_id:str, queries: List[ResearchQuery]) -> Dict[str, Any]:
-        """
-        Execute research for all pending queries in the state.
-        
-        Args:
-            research_id: str - a unique id to associate the query results with
-            queries: containing a list of research queries
-            
-        Returns:
-            Dictionary with research results and updated state information
-        """
         try:
-            logger.info(f"Starting research execution for book {research_id}")
-            self.stats['processing_start_time'] = time.time()
-            
-            # Filter pending queries
-            pending_queries = [q for q in queries if q.query_type.is_pending()]
-            
-            if not pending_queries:
-                logger.warning(f"No pending research queries found for book {research_id}")
-                return {
-                    'updated_queries': queries,
-                    'total_chunks': 0,
-                    'total_sources': 0,
-                    'stats': self.stats,
-                    'chroma_storage_info': self._get_chroma_storage_info(research_id)
+            collection = self.chroma_client.create_collection(
+                name=config.chroma_collection_name,
+                metadata={
+                    "embedding_model": embedding_model,
+                    "dimensions": dimensions,
+                    "created_at": datetime.now().isoformat(),
+                    "description": "Research content collection with embeddings"
                 }
-            
-            len_pending_queries = len(pending_queries)
-            pending_queries_idx = len_pending_queries if len_pending_queries < self.config.max_research_queries else self.config.max_research_queries
-            pending_queries = pending_queries[:pending_queries_idx]
-            logger.info(f"Processing {len(pending_queries)} research queries")
-            
-            # Execute research queries with concurrency control
-            research_results = await self._execute_queries_concurrently(pending_queries, research_id)
-            
-            # Update query statuses
-            updated_queries = self._update_query_statuses(queries, research_results)
-            
-            # Calculate totals
-            total_chunks = sum(result.total_chunks_stored for result_list in research_results.values() for result in result_list)
-            total_sources = sum(result.total_sources for result_list in research_results.values() for result in result_list)
-            
-            # Update statistics
-            self.stats['total_chunks_stored'] += total_chunks
-            self.stats['total_sources_processed'] += total_sources
-            
-            execution_time = time.time() - self.stats['processing_start_time']
-            
-            # Prepare ChromaDB storage information for state
-            chroma_storage_info = self._get_chroma_storage_info(research_id)
-            
-            logger.info(
-                f"Research execution completed for book {research_id}: "
-                f"{total_chunks} chunks stored, {total_sources} sources processed, "
-                f"execution time: {execution_time:.2f}s"
             )
-            
-            return {
-                'updated_queries': updated_queries,
-                'total_chunks': total_chunks,
-                'total_sources': total_sources,
-                'execution_time': execution_time,
-                'stats': self.stats,
-                'detailed_results': research_results,
-                'chroma_storage_info': chroma_storage_info
-            }
-            
+            logger.info(f"Created new collection '{config.chroma_collection_name}' "
+                       f"for model '{embedding_model}' ({dimensions}D)")
+            return collection
         except Exception as e:
-            logger.error(f"Error executing research for book {research_id}: {e}")
-            logger.error(traceback.format_exc())
-            self.stats['queries_failed'] += len(pending_queries)
-            
-            # Return failure result with ChromaDB storage info
-            return {
-                'updated_queries': self._mark_queries_failed(queries, str(e)),
-                'total_chunks': 0,
-                'total_sources': 0,
-                'error': str(e),
-                'stats': self.stats,
-                'chroma_storage_info': self._get_chroma_storage_info(research_id)
-            }
-
-    def _sort_research_queries_by_priority(self, research_queries:List[ResearchQuery]) -> List[ResearchQuery]:
-        """
-        Sort ResearchQuery list by priority: High -> Medium -> Low
-        
-        Args:
-            research_queries: List of ResearchQuery objects
-            
-        Returns:
-            List of ResearchQuery objects sorted by priority
-        """
-        # Define priority order mapping
-        priority_order = {
-            'High': 1,
-            'Medium': 2, 
-            'Low': 3
-        }
-        
-        # Sort using the priority mapping
-        sorted_queries = sorted(
-            research_queries, 
-            key=lambda query: priority_order.get(query.priority, 4)  # Default to 4 for unknown priorities
-        )
-        
-        return sorted_queries
-
-    async def _execute_queries_concurrently(self, queries: List[ResearchQuery], research_id: str) -> Dict[str, List[ResearchResults]]:
-        """
-        Execute research queries with controlled concurrency.
-        
-        Args:
-            queries: List of research queries to execute
-            research_id: Research identifier for metadata
-            
-        Returns:
-            Dictionary mapping query text to ResearchResults
-        """
+            logger.error(f"Failed to create new collection: {e}")
+            raise
+    
+    # Private methods from the original implementation
+    async def _execute_queries_concurrently(
+        self, 
+        queries: List[ResearchQuery], 
+        research_id: str
+    ) -> Dict[str, List[ResearchResults]]:
+        """Execute research queries with controlled concurrency."""
         results: Dict[str, List[ResearchResults]] = {}
         
-        # Process queries in batches to respect concurrency limits
-        batch_size = self.config.max_concurrent_queries
+        # Sort queries by priority
+        sorted_queries = self._sort_research_queries_by_priority(queries)
         
-        queries = self._sort_research_queries_by_priority(queries)
-
-        for i in range(0, len(queries), batch_size):
-            batch = queries[i:i + batch_size]
-            
-            logger.info(f"Processing batch {i//batch_size + 1} with {len(batch)} queries")
-            
-            # Execute batch concurrently using await
-            batch_results = await self._execute_query_batch(batch, research_id)
-            results.update(batch_results)
-            
-            # Rate limiting between batches
-            if i + batch_size < len(queries):
-                await asyncio.sleep(self.config.rate_limit_delay)  # Use async sleep
+        # Process queries in batches
+        batch_size = self.config.specific_config.max_concurrent_queries
         
-        return results
-
-
-    def _execute_queries_concurrently_old(self, queries: List[ResearchQuery], research_id: str) -> Dict[str, ResearchResults]:
-        """
-        Execute research queries with controlled concurrency.
-        
-        Args:
-            queries: List of research queries to execute
-            research_id: Research identifier for metadata
-            
-        Returns:
-            Dictionary mapping query text to ResearchResults
-        """
-        results = {}
-        
-        # Process queries in batches to respect concurrency limits
-        batch_size = self.config.max_concurrent_queries
-        
-        queries = self._sort_research_queries_by_priority(queries)
-
-        for i in range(0, len(queries), batch_size):
-            batch = queries[i:i + batch_size]
+        for i in range(0, len(sorted_queries), batch_size):
+            batch = sorted_queries[i:i + batch_size]
             
             logger.info(f"Processing batch {i//batch_size + 1} with {len(batch)} queries")
             
             # Execute batch concurrently
-            batch_results = asyncio.run(self._execute_query_batch(batch, research_id))
+            batch_results = await self._execute_query_batch(batch, research_id)
             results.update(batch_results)
             
             # Rate limiting between batches
-            if i + batch_size < len(queries):
-                time.sleep(self.config.rate_limit_delay)
+            if i + batch_size < len(sorted_queries):
+                await asyncio.sleep(self.config.specific_config.rate_limit_delay)
         
         return results
     
-    async def _execute_query_batch(self, queries: List[ResearchQuery], research_id: str) -> Dict[str, List[ResearchResults]]:
+    def _sort_research_queries_by_priority(self, queries: List[ResearchQuery]) -> List[ResearchQuery]:
+        """Sort queries by priority."""
+        priority_order = {'High': 1, 'Medium': 2, 'Low': 3}
+        return sorted(
+            queries, 
+            key=lambda query: priority_order.get(query.priority, 4)
+        )
+    
+    async def _execute_query_batch(
+        self, 
+        queries: List[ResearchQuery], 
+        research_id: str
+    ) -> Dict[str, List[ResearchResults]]:
         """Execute a batch of queries concurrently."""
         tasks = []
         
@@ -398,40 +370,35 @@ class ResearcherAgent:
         task_results = await asyncio.gather(*tasks, return_exceptions=True)
         
         # Process results
-        batch_results:Dict[str, List[ResearchResults]] = {}
-        try:
-            for results in task_results:
-                if isinstance(results, Exception):
-                    logger.error(f"Query failed: {results}")
-                    self.stats['queries_failed'] += 1
-                else:
-                    if isinstance(results, list):
-                        for result in cast(Iterable[ResearchResults], results):
-                            batch_results.setdefault(result.query, []).append(result)
-                            self.stats['queries_processed'] += 1
-        except Exception as e:
-            logger.error(f'Failed to batch process: {str(e)}')
+        batch_results: Dict[str, List[ResearchResults]] = {}
+        
+        for results in task_results:
+            if isinstance(results, Exception):
+                logger.error(f"Query failed: {results}")
+                self.stats['queries_failed'] += 1
+            else:
+                if isinstance(results, list):
+                    for result in cast(Iterable[ResearchResults], results):
+                        batch_results.setdefault(result.query, []).append(result)
+                        self.stats['queries_processed'] += 1
+        
         return batch_results
     
-    async def _research_single_query(self, query: ResearchQuery, research_id: str) -> List[ResearchResults]:
-        """
-        Research a single query with retries.
-        
-        Args:
-            query: Research query to execute
-            research_id: Research identifier
-            
-        Returns:
-            ResearchResults for the query
-        """
-        results:List[ResearchResults] = []
+    async def _research_single_query(
+        self, 
+        query: ResearchQuery, 
+        research_id: str
+    ) -> List[ResearchResults]:
+        """Research a single query with retries."""
+        results: List[ResearchResults] = []
         start_time = time.time()
-        last_error = None
-        main_query:str = query.get_query()
-        research_queries:List[str] = query.get_questions()
+        
+        main_query: str = query.get_query()
+        research_queries: List[str] = query.get_questions() or []
         research_queries.append(main_query)
+        
         for _query in research_queries:
-            for attempt in range(self.config.query_retry_attempts):
+            for attempt in range(self.config.specific_config.query_retry_attempts):
                 try:
                     logger.info(f"Executing query [{_query}] (attempt {attempt + 1})")
                     
@@ -442,7 +409,9 @@ class ResearcherAgent:
                     filtered_results = self._filter_search_results(search_results)
                     
                     # Process content and create chunks
-                    processed_chunks = await self._process_search_results(filtered_results, _query, research_id)
+                    processed_chunks = await self._process_search_results(
+                        filtered_results, query, research_id
+                    )
                     
                     # Store chunks in vector database
                     chunks_stored = await self._store_chunks_in_chroma(processed_chunks, research_id)
@@ -453,9 +422,9 @@ class ResearcherAgent:
                     execution_time = time.time() - start_time
                     
                     result = ResearchResults(
-                        query=query.category,
+                        query=query.category or "unknown",
                         search_results=filtered_results,
-                        processed_chunks=[],
+                        processed_chunks=[],  # Don't include full chunks in response
                         total_chunks_stored=chunks_stored,
                         total_sources=len(filtered_results),
                         quality_stats=quality_stats,
@@ -463,170 +432,109 @@ class ResearcherAgent:
                         status='completed'
                     )
                     
-                    logger.info(
-                        f"Query [{query.get_query()}]' completed: {chunks_stored} chunks stored, "
-                        f"{len(filtered_results)} sources processed in {execution_time:.2f}s"
-                    )
-                    
                     results.append(result)
+                    break  # Success, exit retry loop
                     
                 except Exception as e:
-                    last_error = e
-                    logger.warning(f"Query [{query.get_query()}] attempt {attempt + 1} failed: {e}")
-                    
-                    if attempt < self.config.query_retry_attempts - 1:
-                        await asyncio.sleep(self.config.retry_delay_seconds)
-
-        if len(results) > 0:
-            return results
-
-        # All attempts failed
-        execution_time = time.time() - start_time
-        logger.error(f"Query [{main_query}]' failed after {self.config.query_retry_attempts} attempts")
+                    logger.error(f"Query attempt {attempt + 1} failed: {e}")
+                    if attempt == self.config.specific_config.query_retry_attempts - 1:
+                        # Final attempt failed
+                        result = ResearchResults(
+                            query=query.category or "unknown",
+                            search_results=[],
+                            processed_chunks=[],
+                            total_chunks_stored=0,
+                            total_sources=0,
+                            quality_stats={},
+                            execution_time=time.time() - start_time,
+                            status='failed',
+                            error_message=str(e)
+                        )
+                        results.append(result)
         
-        return [ResearchResults(
-            query='; '.join(research_queries),
-            search_results=[],
-            processed_chunks=[],
-            total_chunks_stored=0,
-            total_sources=0,
-            quality_stats={},
-            execution_time=execution_time,
-            status='failed',
-            error_message=str(last_error)
-        )]
+        return results
     
     async def _perform_web_search(self, query: str) -> List[SearchResult]:
-        """
-        Perform web search using Tavily API.
-        
-        Args:
-            query: Search query string
-            
-        Returns:
-            List of SearchResult objects
-        """
+        """Perform web search using Tavily."""
         try:
-            # Execute search with Tavily
-            search_response = self.tavily_client.search(
+            response = self.tavily_client.search(
                 query=query,
-                search_depth=self.config.tavily_search_depth,
-                max_results=self.config.tavily_max_results,
-                include_answer=self.config.tavily_include_answer,
-                include_raw_content=self.config.tavily_include_raw_content,
-                include_images=self.config.tavily_include_images
+                search_depth=self.config.specific_config.tavily_search_depth,
+                max_results=self.config.specific_config.tavily_max_results,
+                include_answer=self.config.specific_config.tavily_include_answer,
+                include_raw_content=self.config.specific_config.tavily_include_raw_content
             )
             
-            # Process search results
             search_results = []
-            tavily_answer = search_response.get('answer', '') if self.config.tavily_include_answer else None
-            
-            for result in search_response.get('results', []):
-                # Extract domain
-                domain = urlparse(result.get('url', '')).netloc.lower()
-                
+            for result in response.get('results', []):
                 search_result = SearchResult(
                     url=result.get('url', ''),
                     title=result.get('title', ''),
                     content=result.get('content', ''),
-                    # raw_content=result.get('raw_content', ''),
                     score=result.get('score', 0.0),
                     published_date=result.get('published_date'),
-                    domain=domain,
+                    domain=urlparse(result.get('url', '')).netloc,
                     query=query,
-                    tavily_answer=tavily_answer
+                    tavily_answer=response.get('answer') if self.config.specific_config.tavily_include_answer else None
                 )
-                
                 search_results.append(search_result)
-            
-            if self.config.log_search_results:
-                logger.info(f"Search for '{query}' returned {len(search_results)} results")
             
             return search_results
             
         except Exception as e:
             logger.error(f"Web search failed for query '{query}': {e}")
-            raise
+            return []
     
     def _filter_search_results(self, results: List[SearchResult]) -> List[SearchResult]:
-        """
-        Filter search results based on quality criteria.
-        
-        Args:
-            results: List of search results
-            query: Original research query
-            
-        Returns:
-            Filtered list of search results
-        """
+        """Filter search results based on quality and domain restrictions."""
         filtered_results = []
         
         for result in results:
-            # Check minimum score threshold
-            if result.score > self.config.min_source_score:
-                filtered_results.append(result)
-                self.processed_urls.add(result.url)
-                continue
-            
-            # Check domain filtering
+            # Skip blocked domains
             if self._is_domain_blocked(result.domain):
-                logger.debug(f"Blocked domain: {result.domain}")
                 continue
             
-            # Check for duplicate URLs
+            # Skip already processed URLs
             if result.url in self.processed_urls:
-                logger.debug(f"Duplicate URL filtered: {result.url}")
                 continue
             
-            # Check content quality
+            # Assess content quality
             if not self._assess_content_quality(result):
-                logger.debug(f"Low quality content filtered: {result.url}")
+                self.stats['low_quality_filtered'] += 1
                 continue
             
             filtered_results.append(result)
             self.processed_urls.add(result.url)
         
-        logger.info(f"Filtered {len(results)} results to {len(filtered_results)} high-quality sources")
         return filtered_results
     
     def _is_domain_blocked(self, domain: str) -> bool:
-        """Check if domain is in blocked list."""
-        for blocked in self.config.blocked_domains:
+        """Check if domain is blocked."""
+        blocked_domains = getattr(self.config.specific_config, 'blocked_domains', [])
+        for blocked in blocked_domains:
             if blocked.lower() in domain.lower():
                 return True
         return False
     
     def _is_domain_trusted(self, domain: str) -> bool:
-        """Check if domain is in trusted list."""
-        for trusted in self.config.trusted_domains:
+        """Check if domain is trusted."""
+        trusted_domains = getattr(self.config.specific_config, 'trusted_domains', [])
+        for trusted in trusted_domains:
             if trusted.lower() in domain.lower():
                 return True
         return False
     
     def _assess_content_quality(self, result: SearchResult) -> bool:
-        """
-        Assess content quality based on various criteria.
-        
-        Args:
-            result: Search result to assess
-            
-        Returns:
-            True if content meets quality standards
-        """
-        if not self.config.enable_content_filtering:
+        """Assess content quality based on various criteria."""
+        if not self.config.specific_config.enable_content_filtering:
             return True
         
-        # Use raw_content if available, otherwise fall back to content
         content = result.tavily_answer or result.content
         
-        if not content or len(content.strip()) < self.config.min_chunk_size:
+        if not content or len(content.strip()) < self.config.specific_config.min_chunk_size:
             return False
         
-        # Check content length (not too short, not too long)
-        if len(content) > self.config.max_content_length:
-            content = content[:self.config.max_content_length]
-        
-        # Basic quality indicators
+        # Basic quality scoring
         quality_score = 0.0
         
         # Domain trust score
@@ -638,23 +546,15 @@ class ResearcherAgent:
         
         # Content structure indicators
         sentence_count = len(re.findall(r'[.!?]+', content))
-        if sentence_count > 3:  # Multiple sentences indicate structured content
+        if sentence_count > 3:
             quality_score += 0.2
-        else:
-            # Count words per sentence
-            word_counts = [len(re.findall(r'\w+', s)) for s in content]
-            average_words_per_sentence = sum(word_counts) / len(word_counts) if word_counts else 0
-
-            # Adjust score if average sentence length is substantial (e.g., 10+ words)
-            if average_words_per_sentence >= 10:
-                quality_score += 0.125  # or another weight based on your scoring logic
-
-        # Presence of meaningful content (not just navigation/ads)
+        
+        # Meaningful word count
         meaningful_words = len(re.findall(r'\b[a-zA-Z]{4,}\b', content))
-        if meaningful_words > 750:
+        if meaningful_words > 50:
             quality_score += 0.1
         
-        return quality_score >= self.config.min_content_quality_score
+        return quality_score >= self.config.specific_config.min_content_quality_score
     
     async def _process_search_results(
         self,
@@ -662,73 +562,56 @@ class ResearcherAgent:
         query: ResearchQuery,
         research_id: str
     ) -> List[ProcessedChunk]:
-        """
-        Process search results into chunks with embeddings.
-        
-        Args:
-            results: Filtered search results
-            query: Original research query
-            research_id: Research identifier
-            
-        Returns:
-            List of ProcessedChunk objects
-        """
+        """Process search results into chunks with embeddings."""
         processed_chunks = []
         
         for result in results:
             try:
-                # Get content (prefer raw_content)
+                # Get content
                 content = result.tavily_answer or result.content
                 if not content:
                     continue
                 
                 # Truncate if too long
-                if len(content) > self.config.max_content_length:
-                    content = content[:self.config.max_content_length]
+                if len(content) > self.config.specific_config.max_content_length:
+                    content = content[:self.config.specific_config.max_content_length]
                 
                 # Split into chunks
                 text_chunks = self.text_splitter.split_text(content)
                 
                 for i, chunk_text in enumerate(text_chunks):
-                    if len(chunk_text.strip()) < self.config.min_chunk_size:
+                    if len(chunk_text.strip()) < self.config.specific_config.min_chunk_size:
                         continue
                     
                     # Check for content duplication
-                    if self.config.filter_duplicate_content:
+                    if self.config.specific_config.filter_duplicate_content:
                         content_hash = self._get_content_hash(chunk_text)
                         if content_hash in self.content_hashes:
                             self.stats['duplicate_content_filtered'] += 1
                             continue
                         self.content_hashes.add(content_hash)
                     
-                    # Generate embedding using Ollama
+                    # Generate embedding
                     embedding = await self.embeddings.aembed_query(chunk_text)
                     
-                    # Create unique chunk ID
-                    category_hash = sha256(query.category.encode()).hexdigest()
-                    chunk_id = f"{research_id}_{category_hash}_{uuid4().hex[:12]}"
-                    
-                    # Create comprehensive metadata
-                    # ChromaDB metadata must be strings, numbers, or booleans - no None values
+                    # Create chunk metadata
+                    chunk_id = str(uuid4())
                     metadata = {
-                        'research_id': str(research_id),
-                        'query': query.get_query(),
-                        'query_type': str(query.query_type),
-                        'query_priority': str(query.priority),
-                        'source_url': str(result.url),
-                        'source_title': str(result.title),
-                        'source_domain': str(result.domain),
-                        'source_score': float(result.score),
-                        'chunk_index': int(i),
-                        'chunk_size': int(len(chunk_text)),
-                        'published_date': str(result.published_date) if result.published_date is not None else "",
-                        'processed_at': str(datetime.now(timezone.utc).isoformat()),
-                        'tavily_answer': str(result.tavily_answer[:500]) if result.tavily_answer else "",
-                        'total_chunks_from_source': int(len(text_chunks)),
-                        'embedding_model': str(self.embeddings.model)  # Track which model was used
+                        'research_id': research_id,
+                        'query_category': query.category or "unknown",
+                        'query_topic': query.topic or "unknown",
+                        'source_url': result.url,
+                        'source_title': result.title,
+                        'source_domain': result.domain,
+                        'chunk_index': i,
+                        'chunk_size': len(chunk_text),
+                        'processed_at': datetime.now(timezone.utc).isoformat(),
+                        'tavily_score': result.score,
+                        'query_priority': query.priority or "Medium",
+                        'embedding_model': getattr(self.config.specific_config, 'embedding_model', 'nomic-embed-text')
                     }
                     
-                    # Calculate quality score for this chunk
+                    # Calculate quality score
                     quality_score = self._calculate_chunk_quality_score(chunk_text, result, query)
                     
                     source_info = {
@@ -748,35 +631,26 @@ class ResearcherAgent:
                     )
                     
                     processed_chunks.append(processed_chunk)
-                    
-                    if self.config.log_chunk_details:
-                        logger.debug(f"Processed chunk {chunk_id}: {len(chunk_text)} chars, quality: {quality_score:.2f}")
                 
             except Exception as e:
                 logger.error(f"Error processing result from {result.url}: {e}")
                 continue
         
-        logger.info(f"Processed {len(processed_chunks)} chunks from {len(results)} search results using Ollama embeddings")
+        logger.info(f"Processed {len(processed_chunks)} chunks from {len(results)} search results")
         return processed_chunks
     
     def _get_content_hash(self, content: str) -> str:
         """Generate hash for content deduplication."""
-        # Normalize content for hashing
         normalized = re.sub(r'\s+', ' ', content.lower().strip())
         return hashlib.md5(normalized.encode()).hexdigest()
     
-    def _calculate_chunk_quality_score(self, chunk_text: str, result: SearchResult, query: ResearchQuery) -> float:
-        """
-        Calculate quality score for a content chunk.
-        
-        Args:
-            chunk_text: Text content of the chunk
-            result: Source search result
-            query: Original research query
-            
-        Returns:
-            Quality score between 0.0 and 1.0
-        """
+    def _calculate_chunk_quality_score(
+        self, 
+        chunk_text: str, 
+        result: SearchResult, 
+        query: ResearchQuery
+    ) -> float:
+        """Calculate quality score for a content chunk."""
         score = 0.0
         
         # Base score from Tavily
@@ -786,93 +660,73 @@ class ResearcherAgent:
         if self._is_domain_trusted(result.domain):
             score += 0.2
         
-        # Content length factor (optimal range)
+        # Content length factor
         text_length = len(chunk_text)
         if 200 <= text_length <= 800:
             score += 0.15
         elif 100 <= text_length <= 1200:
             score += 0.1
         
-        # Query relevance (simple keyword matching)
+        # Query relevance
         query_words = set(query.get_query().lower().split())
         chunk_words = set(chunk_text.lower().split())
         relevance = len(query_words.intersection(chunk_words)) / len(query_words) if query_words else 0
         score += relevance * 0.2
         
         # Content structure indicators
-        if len(re.findall(r'[.!?]', chunk_text)) >= 2:  # Multiple sentences
+        if len(re.findall(r'[.!?]', chunk_text)) >= 2:
             score += 0.1
         
-        # Avoid promotional/spammy content
+        # Avoid spam content
         spam_indicators = ['click here', 'subscribe now', 'buy now', '!!!', 'free trial']
         if not any(indicator in chunk_text.lower() for indicator in spam_indicators):
             score += 0.05
         
-        return min(1.0, score)  # Cap at 1.0
+        return min(1.0, score)
     
-    async def _store_chunks_in_chroma(self, chunks: List[ProcessedChunk], research_id: str) -> int:
-        """
-        Store processed chunks in Chroma vector database.
-        
-        Args:
-            chunks: List of processed chunks to store
-            research_id: Research identifier
-            
-        Returns:
-            Number of chunks successfully stored
-        """
+    async def _store_chunks_in_chroma(
+        self, 
+        chunks: List[ProcessedChunk], 
+        research_id: str
+    ) -> int:
+        """Store processed chunks in ChromaDB."""
         if not chunks:
             return 0
         
         try:
+            # Prepare data for batch insertion
+            ids = [chunk.chunk_id for chunk in chunks]
+            embeddings = [chunk.embedding for chunk in chunks]
+            documents = [chunk.content for chunk in chunks]
+            metadatas = [chunk.metadata for chunk in chunks]
+            
+            # Insert in batches
+            batch_size = self.config.specific_config.batch_size
             stored_count = 0
             
-            # Process chunks in batches
-            batch_size = self.config.batch_size
-            
             for i in range(0, len(chunks), batch_size):
-                batch = chunks[i:i + batch_size]
+                batch_ids = ids[i:i + batch_size]
+                batch_embeddings = embeddings[i:i + batch_size]
+                batch_documents = documents[i:i + batch_size]
+                batch_metadatas = metadatas[i:i + batch_size]
                 
                 try:
-                    # Prepare batch data for Chroma
-                    ids = [chunk.chunk_id for chunk in batch]
-                    documents = [chunk.content for chunk in batch]
-                    embeddings = [chunk.embedding for chunk in batch]
-                    metadatas = [chunk.metadata for chunk in batch]
-                    
-                    # Log the research_id being stored for debugging
-                    if metadatas:
-                        sample_research_ids = set(m.get('research_id') for m in metadatas[:3])
-                        logger.info(f"Storing batch with research_ids: {list(sample_research_ids)} (types: {[type(bid) for bid in sample_research_ids]})")
-                    
-                    # Store batch in Chroma
                     self.chroma_collection.add(
-                        ids=ids,
-                        documents=documents,
-                        embeddings=embeddings,
-                        metadatas=metadatas
+                        ids=batch_ids,
+                        embeddings=batch_embeddings,
+                        documents=batch_documents,
+                        metadatas=batch_metadatas
                     )
-                    
-                    stored_count += len(batch)
-                    
-                    logger.debug(f"Stored batch of {len(batch)} chunks in Chroma")
-                    
-                    # Small delay between batches to avoid overwhelming the server
-                    if i + batch_size < len(chunks):
-                        await asyncio.sleep(0.1)
-                
+                    stored_count += len(batch_ids)
                 except Exception as e:
-                    logger.error(f"Failed to store batch starting at index {i}: {e}")
-                    # Continue with next batch rather than failing completely
-                    continue
-            if stored_count > 0:
-                logger.info(f"Stored {stored_count} chunks in Chroma for book {research_id}")
-            else:
-                logger.warning(f"Did not store any chunks in Chroma for book {research_id}")
+                    logger.error(f"Failed to store batch of chunks: {e}")
+            
+            self.stats['total_chunks_stored'] += stored_count
+            logger.info(f"Stored {stored_count} chunks in ChromaDB")
             return stored_count
             
         except Exception as e:
-            logger.error(f"Error storing chunks in Chroma: {e}")
+            logger.error(f"Error storing chunks in ChromaDB: {e}")
             return 0
     
     def _calculate_quality_stats(self, chunks: List[ProcessedChunk]) -> Dict[str, Any]:
@@ -916,288 +770,64 @@ class ResearcherAgent:
         updated_queries = []
         
         for query in original_queries:
-            updated_query = query.copy()
+            updated_query = query.model_copy()
             
-            if query.get_query() in results:
-                result_list = results[query.get_query()]
+            query_key = query.get_query()
+            if query_key in results:
+                result_list = results[query_key]
                 if result_list:
-                    # Use the first result for status and aggregate data from all results
+                    # Use the first result for status
                     first_result = result_list[0]
-                    updated_query['status'] = first_result.status
-                    
-                    # Aggregate data from all results
-                    total_chunks = sum(r.total_chunks_stored for r in result_list)
-                    total_sources = sum(r.total_sources for r in result_list)
-                    total_execution_time = sum(r.execution_time for r in result_list)
-                    
-                    updated_query['results_count'] = total_chunks
-                    updated_query['execution_time'] = total_execution_time
-                    updated_query['sources_processed'] = total_sources
-                    
-                    # Combine quality stats from all results
-                    combined_quality_stats = {}
-                    if result_list[0].quality_stats:
-                        combined_quality_stats = result_list[0].quality_stats.copy()
-                        # If there are multiple results, you may want to aggregate quality stats
-                        # For now, just use the first result's quality stats
-                    updated_query['quality_stats'] = combined_quality_stats
-                    
-                    # Check for any error messages
-                    error_messages = [r.error_message for r in result_list if r.error_message]
-                    if error_messages:
-                        updated_query['error_message'] = '; '.join(error_messages)
+                    updated_query.query_type = (
+                        QueryStatus.COMPLETED if first_result.status == 'completed' 
+                        else QueryStatus.FAILED
+                    )
             
             updated_queries.append(updated_query)
         
         return updated_queries
     
-    def _mark_queries_failed(self, queries: List[ResearchQuery], error_message: str) -> List[ResearchQuery]:
+    def _mark_queries_failed(
+        self, 
+        queries: List[ResearchQuery], 
+        error_message: str
+    ) -> List[ResearchQuery]:
         """Mark all queries as failed with error message."""
         updated_queries = []
         
         for query in queries:
-            updated_query = query.copy()
+            updated_query = query.model_copy()
             if updated_query.query_type.is_pending():
                 updated_query.query_type = QueryStatus.FAILED
-                updated_query['error_message'] = error_message
-                updated_query['results_count'] = 0
             updated_queries.append(updated_query)
         
         return updated_queries
     
-    def search_similar_content(
-        self,
-        query_text: str,
-        research_id: str,
-        limit: int = 10,
-        similarity_threshold: float = 0.7
-    ) -> List[Dict[str, Any]]:
-        """
-        Search for similar content in the vector database.
-        
-        Args:
-            query_text: Text to search for
-            research_id: Research identifier to filter by
-            limit: Maximum number of results
-            similarity_threshold: Minimum similarity score
-            
-        Returns:
-            List of similar content chunks with metadata
-        """
-        try:
-            # Generate embedding for query using Ollama
-            query_embedding = self.embeddings.embed_query(query_text)
-            
-            # Search in Chroma
-            results = self.chroma_collection.query(
-                query_embeddings=[query_embedding],
-                n_results=limit,
-                where={"research_id": research_id},
-                include=["documents", "metadatas", "distances"]
-            )
-            
-            # Process results
-            similar_chunks = []
-            
-            if results['documents'] and results['documents'][0]:
-                documents = results['documents'][0]
-                metadatas = results['metadatas'][0] if results['metadatas'] else []
-                distances = results['distances'][0] if results['distances'] else []
-                
-                for i, (doc, metadata, distance) in enumerate(zip(documents, metadatas, distances)):
-                    # Convert distance to similarity (assuming cosine distance)
-                    similarity = 1 - distance if distance else 0
-                    
-                    if similarity >= similarity_threshold:
-                        similar_chunks.append({
-                            'content': doc,
-                            'metadata': metadata,
-                            'similarity_score': similarity,
-                            'rank': i + 1
-                        })
-            
-            logger.info(f"Found {len(similar_chunks)} similar chunks for query '{query_text}' using Ollama embeddings")
-            return similar_chunks
-            
-        except Exception as e:
-            logger.error(f"Error searching similar content: {e}")
-            return []
-    
-    def get_research_summary(self, research_id: str) -> Dict[str, Any]:
-        """
-        Get comprehensive research summary for a book.
-        
-        Args:
-            research_id: Research identifier
-            
-        Returns:
-            Research summary with statistics and metadata
-        """
-        try:
-            # Query all chunks for this book
-            results = self.chroma_collection.get(
-                where={"research_id": research_id},
-                include=["metadatas"]
-            )
-            
-            if not results['metadatas']:
-                return {
-                    'research_id': research_id,
-                    'total_chunks': 0,
-                    'error': 'No research data found'
-                }
-            
-            metadatas = results['metadatas']
-            
-            # Calculate summary statistics
-            total_chunks = len(metadatas)
-            
-            # Query type distribution
-            query_types = {}
-            for metadata in metadatas:
-                query_type = metadata.get('query_type', 'unknown')
-                query_types[query_type] = query_types.get(query_type, 0) + 1
-            
-            # Source diversity
-            unique_domains = len(set(m.get('source_domain', '') for m in metadatas))
-            unique_sources = len(set(m.get('source_url', '') for m in metadatas))
-            
-            # Priority distribution
-            priorities = {}
-            for metadata in metadatas:
-                priority = metadata.get('query_priority', 0)
-                priorities[priority] = priorities.get(priority, 0) + 1
-            
-            # Time range
-            processed_times = [m.get('processed_at') for m in metadatas if m.get('processed_at')]
-            earliest = min(processed_times) if processed_times else None
-            latest = max(processed_times) if processed_times else None
-            
-            # Embedding model info
-            embedding_models = set(m.get('embedding_model', 'unknown') for m in metadatas)
-            
-            summary = {
-                'research_id': research_id,
-                'total_chunks': total_chunks,
-                'unique_sources': unique_sources,
-                'unique_domains': unique_domains,
-                'query_type_distribution': query_types,
-                'priority_distribution': priorities,
-                'research_period': {
-                    'earliest': earliest,
-                    'latest': latest
-                },
-                'avg_chunk_size': sum(m.get('chunk_size', 0) for m in metadatas) / total_chunks if total_chunks else 0,
-                'embedding_models_used': list(embedding_models)
-            }
-            
-            logger.info(f"Generated research summary for book {research_id}: {total_chunks} chunks from {unique_sources} sources")
-            return summary
-            
-        except Exception as e:
-            logger.error(f"Error generating research summary for book {research_id}: {e}")
-            return {
-                'research_id': research_id,
-                'error': str(e)
-            }
-    
-    def cleanup_book_research(self, research_id: str) -> bool:
-        """
-        Clean up research data for a specific book.
-        
-        Args:
-            research_id: Research identifier
-            
-        Returns:
-            True if cleanup successful, False otherwise
-        """
-        try:
-            # Get all chunk IDs for this book
-            results = self.chroma_collection.get(
-                where={"research_id": research_id},
-                include=["metadatas"]
-            )
-            
-            if results['ids']:
-                chunk_ids = results['ids']
-                
-                # Delete chunks in batches
-                batch_size = self.config.batch_size
-                deleted_count = 0
-                
-                for i in range(0, len(chunk_ids), batch_size):
-                    batch_ids = chunk_ids[i:i + batch_size]
-                    
-                    try:
-                        self.chroma_collection.delete(ids=batch_ids)
-                        deleted_count += len(batch_ids)
-                    except Exception as e:
-                        logger.error(f"Failed to delete batch of chunks: {e}")
-                
-                logger.info(f"Cleaned up {deleted_count} research chunks for book {research_id}")
-                return deleted_count == len(chunk_ids)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error cleaning up research for book {research_id}: {e}")
-            return False
-    
     def _get_chroma_storage_info(self, research_id: str) -> Dict[str, Any]:
-        """
-        Get ChromaDB storage information for the book.
-        
-        Args:
-            research_id: Research identifier
-            
-        Returns:
-            Dictionary with ChromaDB storage details
-        """
+        """Get ChromaDB storage information for the research session."""
         try:
-            # Get current chunk count for this book
-            current_count = 0
-            try:
-                results = self.chroma_collection.get(
-                    where={"research_id": research_id},
-                    include=["metadatas"]
-                )
-                current_count = len(results['ids']) if results['ids'] else 0
-            except Exception as e:
-                logger.warning(f"Could not get current chunk count for book {research_id}: {e}")
+            results = self.chroma_collection.get(
+                where={"research_id": research_id},
+                include=["metadatas"]
+            )
             
-            storage_info = {
-                'collection_name': self.config.chroma_collection_name,
-                'chroma_host': self.config.chroma_host,
-                'chroma_port': self.config.chroma_port,
+            return {
                 'research_id': research_id,
-                'chunks_in_collection': current_count,
-                'last_updated': datetime.now(timezone.utc).isoformat(),
-                'storage_type': 'chromadb',
-                'embedding_model': getattr(self.config, 'embedding_model', 'nomic-embed-text'),
-                'ollama_base_url': getattr(self.config, 'ollama_base_url', 'http://localhost:11434')
+                'total_chunks': len(results['metadatas']) if results['metadatas'] else 0,
+                'collection_name': self.config.specific_config.chroma_collection_name,
+                'host': self.config.specific_config.chroma_host,
+                'port': self.config.specific_config.chroma_port
             }
-            
-            logger.debug(f"ChromaDB storage info for book {research_id}: {storage_info}")
-            return storage_info
             
         except Exception as e:
-            logger.error(f"Error getting ChromaDB storage info for book {research_id}: {e}")
-            # Return minimal storage info even if there's an error
             return {
-                'collection_name': self.config.chroma_collection_name,
-                'chroma_host': self.config.chroma_host,
-                'chroma_port': self.config.chroma_port,
                 'research_id': research_id,
-                'chunks_in_collection': 0,
-                'last_updated': datetime.now(timezone.utc).isoformat(),
-                'storage_type': 'chromadb',
-                'embedding_model': getattr(self.config, 'embedding_model', 'nomic-embed-text'),
-                'ollama_base_url': getattr(self.config, 'ollama_base_url', 'http://localhost:11434'),
-                'error': str(e)
+                'error': str(e),
+                'collection_name': self.config.specific_config.chroma_collection_name
             }
     
-    def get_stats(self) -> Dict[str, Any]:
-        """Get current statistics for the researcher agent."""
+    def get_current_stats(self) -> Dict[str, Any]:
+        """Get current execution statistics."""
         current_stats = self.stats.copy()
         
         if current_stats['processing_start_time']:
@@ -1210,30 +840,234 @@ class ResearcherAgent:
         except:
             current_stats['total_chunks_in_collection'] = 'unavailable'
         
-        # Add embedding model info
-        current_stats['embedding_model'] = getattr(self.config, 'embedding_model', 'nomic-embed-text')
-        current_stats['ollama_base_url'] = getattr(self.config, 'ollama_base_url', 'http://localhost:11434')
+        # Add configuration info
+        current_stats['embedding_model'] = getattr(
+            self.config.specific_config, 'embedding_model', 'nomic-embed-text'
+        )
+        current_stats['ollama_base_url'] = self.config.specific_config.ollama_base_url
         
         return current_stats
     
+    def is_similar_content(self, text1: str, text2: str, threshold: float = 0.8) -> bool:
+        """
+        Check if two texts are similar based on their first 100 characters.
+        
+        Args:
+            text1: First text to compare
+            text2: Second text to compare  
+            threshold: Similarity threshold (0.0-1.0), default 0.8
+            
+        Returns:
+            True if texts are similar, False otherwise
+        """
+        if not text1 or not text2:
+            return False
+        
+        # Compare first 100 characters
+        sample1 = text1[:100].strip().lower()
+        sample2 = text2[:100].strip().lower()
+        
+        # Use SequenceMatcher to calculate similarity ratio
+        similarity = SequenceMatcher(None, sample1, sample2).ratio()
+        return similarity >= threshold
+    
+    def extract_refined_search_results(self, research_output: ResearcherOutput) -> Dict[str, List[str]]:
+        """
+        Extract and refine Tavily answers from research results organized by category.
+        Filters out duplicate or highly similar answers based on content similarity.
+        
+        Args:
+            research_output: ResearcherOutput containing processed research results
+            
+        Returns:
+            Dict mapping category names to lists of unique tavily_answer strings
+            Example: {
+                "World-Building": ["answer1", "answer2", ...],
+                "Character Development": ["answer1", "answer2", ...],
+                ...
+            }
+        """
+        category_answers = {}
+        
+        # Group queries by category first
+        queries_by_category = {}
+        for query in research_output.updated_queries:
+            category = query.category or "Unknown"
+            if category not in queries_by_category:
+                queries_by_category[category] = []
+            queries_by_category[category].append(query)
+        
+        # For each category, we need to look up the corresponding results
+        # Since we don't have direct access to the detailed results here,
+        # we'll need to search ChromaDB for the stored chunks
+        for category, queries in queries_by_category.items():
+            answers = []
+            
+            try:
+                # Query ChromaDB for chunks related to this category
+                chroma_results = self.chroma_collection.get(
+                    where={
+                        "research_id": research_output.research_id,
+                        "query_category": category
+                    },
+                    include=["metadatas", "documents"]
+                )
+                
+                if chroma_results and chroma_results['metadatas']:
+                    # Extract unique answers from stored metadata or reconstruct from documents
+                    seen_sources = set()
+                    
+                    for i, metadata in enumerate(chroma_results['metadatas']):
+                        source_url = metadata.get('source_url', '')
+                        source_title = metadata.get('source_title', '')
+                        
+                        # Create a unique identifier for this source
+                        source_key = f"{source_url}:{source_title}"
+                        
+                        if source_key not in seen_sources:
+                            seen_sources.add(source_key)
+                            
+                            # Use the document content as the "answer"
+                            if i < len(chroma_results['documents']):
+                                document_content = chroma_results['documents'][i]
+                                
+                                # Check if this content is similar to any existing answer
+                                is_duplicate = any(
+                                    self.is_similar_content(document_content, existing_answer)
+                                    for existing_answer in answers
+                                )
+                                
+                                if not is_duplicate and document_content:
+                                    answers.append(document_content)
+                
+            except Exception as e:
+                logger.warning(f"Failed to extract results for category '{category}': {e}")
+                # Fallback: use a generic message
+                answers.append(f"Research completed for {category} but detailed results unavailable")
+            
+            category_answers[category] = answers
+        
+        return category_answers
+    
+    def extract_refined_search_results_from_raw_data(
+        self, 
+        research_results: Dict[str, List[ResearchResults]]
+    ) -> Dict[str, List[str]]:
+        """
+        Extract refined search results directly from raw ResearchResults data.
+        This method works with the internal results format before they're stored.
+        
+        Args:
+            research_results: Dict mapping query strings to lists of ResearchResults
+            
+        Returns:
+            Dict mapping category names to lists of unique tavily_answer strings
+        """
+        category_answers = {}
+        
+        for query_string, result_list in research_results.items():
+            for research_result in result_list:
+                # Extract category from the research result
+                category = research_result.query or "Unknown"
+                
+                if category not in category_answers:
+                    category_answers[category] = []
+                
+                # Extract tavily answers from search results
+                for search_result in research_result.search_results:
+                    if search_result.tavily_answer:
+                        tavily_answer = search_result.tavily_answer
+                        
+                        # Check if this answer is similar to any existing answer in this category
+                        is_duplicate = any(
+                            self.is_similar_content(tavily_answer, existing_answer)
+                            for existing_answer in category_answers[category]
+                        )
+                        
+                        if not is_duplicate:
+                            category_answers[category].append(tavily_answer)
+        
+        return category_answers
+    
+    async def get_research_summary_by_category(self, research_id: str) -> Dict[str, List[str]]:
+        """
+        Get a refined summary of research results organized by category.
+        This method queries the stored ChromaDB data and returns deduplicated content.
+        
+        Args:
+            research_id: Research session identifier
+            
+        Returns:
+            Dict mapping category names to lists of unique content strings
+        """
+        category_answers = {}
+        
+        try:
+            # Query all chunks for this research session
+            results = self.chroma_collection.get(
+                where={"research_id": research_id},
+                include=["metadatas", "documents"]
+            )
+            
+            if not results['metadatas']:
+                return {}
+            
+            # Group by category
+            for i, metadata in enumerate(results['metadatas']):
+                category = metadata.get('query_category', 'Unknown')
+                
+                if category not in category_answers:
+                    category_answers[category] = []
+                
+                # Get the document content
+                if i < len(results['documents']):
+                    document_content = results['documents'][i]
+                    
+                    # Only include substantial content (more than 50 characters)
+                    if len(document_content.strip()) > 50:
+                        # Check for similarity with existing content in this category
+                        is_duplicate = any(
+                            self.is_similar_content(document_content, existing_content)
+                            for existing_content in category_answers[category]
+                        )
+                        
+                        if not is_duplicate:
+                            category_answers[category].append(document_content.strip())
+            
+            # Sort answers by length (longer, more detailed answers first)
+            for category in category_answers:
+                category_answers[category].sort(key=len, reverse=True)
+            
+            return category_answers
+            
+        except Exception as e:
+            logger.error(f"Failed to get research summary for {research_id}: {e}")
+            return {}
 
-async def main():
-    import json
-    from uuid import uuid4
-    from pathlib import Path
-    import sys
 
-    project_root = Path(__name__).parent.parent.parent.parent.parent.parent
-    sys.path.insert(0, str(project_root))
-    conf = ResearcherConfig()
-    agent = ResearcherAgent(conf)
-    with open('musequill/services/backend/outputs/research-20250801-184051.json', "r", encoding='utf-8') as f:
-        json_payload = f.read()
-        payload = json.loads(json_payload)
-        research_id = str(uuid4())
-        queries = ResearchQuery.load_research_queries(json_payload)
-        results = await agent.execute_research(research_id, queries)
-        print('DONE')        
+# Helper function to create a properly configured researcher component
+def create_researcher_component(
+    component_name: str = "Research Agent",
+    researcher_config: Optional[ResearcherConfig] = None
+) -> ResearcherComponent:
+    """Create a researcher component with proper configuration."""
+    
+    if researcher_config is None:
+        researcher_config = ResearcherConfig()
+    
+    component_config = ComponentConfiguration[ResearcherConfig](
+        component_type=ComponentType.MARKET_INTELLIGENCE,  # Closest matching type
+        component_name=component_name,
+        specific_config=researcher_config
+    )
+    
+    return ResearcherComponent(component_config)
 
-if __name__ == "__main__":
-    asyncio.run(main())
+
+# Example usage and registration
+def register_researcher_component():
+    """Register the researcher component type with the global registry."""
+    from musequill.v3.components.base.component_interface import component_registry
+    
+    component_registry.register_component_type("researcher", ResearcherComponent)
+    return True
