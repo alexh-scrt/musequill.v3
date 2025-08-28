@@ -5,6 +5,7 @@ MuseQuill V3 Main Pipeline Entry Point - Enhanced with Registry Pattern
 This enhanced version uses the component registry pattern for better architecture,
 maintainability, and configuration management.
 """
+# pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
 import asyncio
 import argparse
@@ -18,7 +19,7 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 
 # Import enhanced registry and orchestration
-from musequill.v3.components.component_registry import setup_component_system, create_minimal_component_configurations
+from musequill.v3.components.component_registry import setup_enhanced_component_system, create_enhanced_component_configurations
 from musequill.v3.components.base.component_interface import component_registry, ComponentError
 from musequill.v3.components.orchestration.enhanced_pipeline_orchestrator import EnhancedPipelineOrchestrator
 
@@ -60,7 +61,7 @@ class EnhancedPipelineRunner:
             self.logger.info("🔧 Initializing component registry...")
             
             # Setup component system (registers all component types)
-            registry_success = setup_component_system()
+            registry_success = setup_enhanced_component_system()
             if not registry_success:
                 self.logger.error("Failed to setup component system")
                 return False
@@ -76,18 +77,23 @@ class EnhancedPipelineRunner:
             
             # Create orchestrator instance using registry
             self.logger.info("🎭 Creating pipeline orchestrator...")
+            # orchestrator_id = component_registry.create_component(
+            #     'pipeline_orchestrator', 
+            #     pipeline_config.orchestrator_config
+            # )
+            
             orchestrator_id = component_registry.create_component(
                 'pipeline_orchestrator', 
                 pipeline_config.orchestrator_config
             )
-            
+
             self.orchestrator = component_registry.get_component(orchestrator_id)
             if not self.orchestrator:
                 raise ComponentError(f"Failed to create orchestrator with ID: {orchestrator_id}")
             
             # Initialize all pipeline components through orchestrator
             self.logger.info("🏗️ Initializing pipeline components...")
-            init_success = await self.orchestrator.initialize_pipeline(pipeline_config)
+            init_success = await self.orchestrator._initialize_all_components(pipeline_config)
             
             if init_success:
                 self.logger.info("✅ Pipeline initialization complete")
@@ -328,7 +334,6 @@ Examples:
     parser.add_argument('--story', type=Path, help='Story configuration file (.json)')
     parser.add_argument('--example', action='store_true', help='Run with example configuration')
     parser.add_argument('--validate-config', action='store_true', help='Validate configuration and exit')
-    parser.add_argument('--test-registry', action='store_true', help='Test component registry setup and exit')
     parser.add_argument('--log-level', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'], 
                        default='INFO', help='Logging level')
     parser.add_argument('--log-dir', type=Path, default=Path('logs'), help='Directory for log files')
@@ -351,14 +356,7 @@ Examples:
         'working_directory': str(Path.cwd()),
         'registry_pattern': True
     })
-    
-    # Handle special modes
-    if args.test_registry:
-        logger.info("🧪 Testing component registry setup...")
-        from musequill.v3.components.component_registry import main as test_registry
-        await test_registry()
-        return
-    
+        
     try:
         # Load enhanced configuration
         if args.example:

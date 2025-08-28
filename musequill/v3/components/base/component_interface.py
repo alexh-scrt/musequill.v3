@@ -404,7 +404,7 @@ class ComponentError(Exception):
 
 class ComponentRegistry(BaseModel):
     """Registry for managing component instances and types."""
-    
+    model_config = {"arbitrary_types_allowed": True}
     registered_types: Dict[str, type] = Field(default_factory=dict)
     active_components: Dict[str, BaseComponent] = Field(default_factory=dict)
     

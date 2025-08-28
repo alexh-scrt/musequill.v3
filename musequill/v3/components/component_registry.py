@@ -18,6 +18,7 @@ from musequill.v3.components.discriminators.plot_coherence_critic import PlotCoh
 from musequill.v3.components.quality_control.comprehensive_quality_controller import ComprehensiveQualityController, QualityControllerConfig
 from musequill.v3.components.researcher.researcher_agent import ResearcherComponent, ResearcherConfig
 from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestrator, PipelineOrchestratorConfig, OrchestrationStrategy
+from musequill.v3.components.orchestration.enhanced_pipeline_orchestrator import EnhancedPipelineOrchestrator
 
 # Import LLM Discriminator components
 from musequill.v3.components.discriminators.llm_discriminator import LLMDiscriminator, LLMDiscriminatorConfig
@@ -62,7 +63,7 @@ def register_existing_components() -> bool:
         component_registry.register_component_type("researcher", ResearcherComponent)
         
         # Register Orchestrator
-        component_registry.register_component_type("pipeline_orchestrator", PipelineOrchestrator)
+        component_registry.register_component_type("pipeline_orchestrator", EnhancedPipelineOrchestrator)
         
         print(f"✅ Registered {len(component_registry.registered_types)} existing component types")
         return True
@@ -187,7 +188,7 @@ def create_enhanced_component_configurations() -> Dict[str, ComponentConfigurati
     )
     
     orchestrator_config = PipelineOrchestratorConfig(
-        orchestration_strategy=OrchestrationStrategy.QUALITY_FOCUSED,
+        orchestration_strategy=OrchestrationStrategy.QUALITY_FIRST,
         max_concurrent_components=3,
         component_timeout_seconds=300,
         enable_checkpoints=True

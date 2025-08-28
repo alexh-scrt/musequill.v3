@@ -249,11 +249,12 @@ def create_pipeline_configuration_from_dict(config_dict: Dict[str, Any]) -> Pipe
     Returns:
         PipelineConfiguration instance
     """
-    from musequill.v3.components.component_registry import create_minimal_component_configurations
+    from musequill.v3.components.component_registry import create_enhanced_component_configurations
+
     from musequill.v3.components.base.component_interface import ComponentConfiguration, ComponentType
     
     # Get component configurations from registry
-    component_configs = create_minimal_component_configurations()
+    component_configs = create_enhanced_component_configurations()
     
     # Extract orchestrator configuration
     orchestrator_config = component_configs.get('pipeline_orchestrator')
