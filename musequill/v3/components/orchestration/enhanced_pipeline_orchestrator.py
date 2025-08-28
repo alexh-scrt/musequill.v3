@@ -13,7 +13,7 @@ from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 
-from musequill.v3.components.base.component_interface import BaseComponent
+from musequill.v3.components.base.component_interface import BaseComponent, ComponentConfiguration, ComponentType
 from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestrator
 
 # Import the enhanced researcher
@@ -21,6 +21,16 @@ from .pipeline_researcher import (
     PipelineResearcher, PipelineResearcherConfig, ResearchRequest, 
     ResearchResponse, ResearchScope, ResearchPriority, ResearchContext,
     ResearchableMixin
+)
+from musequill.v3.components.discriminators.llm_discriminator import (
+    LLMDiscriminator, 
+    LLMDiscriminatorConfig,
+    LLMDiscriminatorInput,
+    LLMDiscriminatorOutput
+)
+from musequill.v3.models.llm_discriminator_models import (
+    ComprehensiveLLMCritique,
+    CritiqueDimension
 )
 
 logger = logging.getLogger(__name__)
@@ -65,6 +75,9 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         self.last_research_times: Dict[str, datetime] = {}
         self.research_enabled = config.get('enable_auto_research', True)
         
+        # LLM Discriminator integration
+        self._llm_discriminator = None
+        
         # Setup default research rules
         self._setup_default_research_rules()
     
@@ -73,13 +86,70 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         await super().initialize()
         await self.researcher.initialize()
         
+        # Initialize LLM Discriminator
+        if self.config.get('enable_llm_discriminator', True):
+            await self._initialize_llm_discriminator()
+        
         # Inject researcher into components
         self._inject_researcher_into_components()
         
         logger.info("Enhanced pipeline orchestrator with research capabilities initialized")
     
+    async def _initialize_llm_discriminator(self):
+        """Initialize the LLM discriminator component."""
+        try:
+            llm_config = self._create_llm_discriminator_config()
+            component_config = ComponentConfiguration(
+                component_type=ComponentType.DISCRIMINATOR,
+                component_name="LLM Literary Discriminator",
+                version="1.0.0",
+                max_concurrent_executions=1,
+                execution_timeout_seconds=120,
+                specific_config=llm_config
+            )
+            
+            self._llm_discriminator = LLMDiscriminator(component_config)
+            if await self._llm_discriminator.initialize():
+                logger.info("LLM Discriminator initialized successfully")
+            else:
+                logger.error("Failed to initialize LLM Discriminator")
+                self._llm_discriminator = None
+                
+        except Exception as e:
+            logger.error(f"LLM Discriminator initialization failed: {e}")
+            self._llm_discriminator = None
+    
+    def _create_llm_discriminator_config(self) -> LLMDiscriminatorConfig:
+        """Create LLM discriminator configuration from pipeline config."""
+        llm_settings = self.config.get('llm_discriminator', {})
+        
+        return LLMDiscriminatorConfig(
+            llm_model_name=llm_settings.get('model', "llama3.3:70b"),
+            analysis_temperature=llm_settings.get('temperature', 0.2),
+            max_analysis_tokens=llm_settings.get('max_tokens', 2000),
+            critique_depth=llm_settings.get('depth', "comprehensive"),
+            focus_areas=llm_settings.get('focus_areas', [
+                CritiqueDimension.PLOT_COHERENCE.value,
+                CritiqueDimension.CHARACTER_DEVELOPMENT.value,
+                CritiqueDimension.PROSE_QUALITY.value,
+                CritiqueDimension.PACING.value,
+                CritiqueDimension.EMOTIONAL_RESONANCE.value,
+                CritiqueDimension.MARKET_APPEAL.value
+            ]),
+            scoring_strictness=llm_settings.get('strictness', 0.75),
+            include_suggestions=llm_settings.get('include_suggestions', True),
+            max_analysis_time_seconds=llm_settings.get('max_time', 90)
+        )
+    
     async def shutdown(self):
         """Shutdown the orchestrator and researcher."""
+        if self._llm_discriminator:
+            try:
+                await self._llm_discriminator.cleanup()
+                logger.info("LLM Discriminator cleaned up")
+            except Exception as e:
+                logger.error(f"LLM Discriminator cleanup failed: {e}")
+        
         await self.researcher.shutdown()
         await super().shutdown()
     
@@ -169,6 +239,327 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
                     logger.error(f"Failed to execute auto-research for {rule.trigger.value}: {e}")
         
         return triggered_research
+    
+    # ENHANCED DISCRIMINATION PIPELINE WITH LLM
+    
+    async def _execute_discrimination_pipeline(
+        self,
+        chapter_variant,
+        story_state,
+        market_intelligence: Optional = None
+    ) -> Dict[str, Any]:
+        """
+        Execute discriminator pipeline with LLM discriminator integration.
+        
+        NEW EVALUATION ORDER:
+        1. LLM Discriminator (provides comprehensive initial assessment)
+        2. Traditional discriminators (plot, literary, engagement)
+        3. Comparative analysis between LLM and traditional results
+        """
+        discrimination_results = {
+            'llm_critique': None,
+            'traditional_critiques': {},
+            'comparative_analysis': None,
+            'final_assessment': None
+        }
+        
+        # STEP 1: LLM Discrimination (First - provides comprehensive overview)
+        if self._llm_discriminator:
+            try:
+                logger.info("Running LLM discriminator (first pass)")
+                llm_input = LLMDiscriminatorInput(
+                    chapter_variant=chapter_variant,
+                    story_state=story_state,
+                    market_intelligence=market_intelligence,
+                    previous_chapters_summary=self._get_previous_chapters_summary(story_state)
+                )
+                
+                llm_result = await self._llm_discriminator.process(llm_input)
+                discrimination_results['llm_critique'] = llm_result
+                
+                logger.info(f"LLM critique completed - Overall score: {llm_result.overall_score:.2f}")
+                
+            except Exception as e:
+                logger.error(f"LLM discriminator failed: {e}")
+        
+        # STEP 2: Traditional Discriminators (Enhanced with LLM context)
+        traditional_results = {}
+        
+        # Plot Coherence Critic
+        plot_component = self.get_component('plot_coherence_critic')
+        if plot_component:
+            try:
+                plot_input = self._create_plot_critic_input(
+                    chapter_variant, 
+                    story_state,
+                    llm_context=discrimination_results['llm_critique']
+                )
+                plot_result = await plot_component.execute(plot_input)
+                traditional_results['plot_coherence'] = plot_result
+                logger.info(f"Plot coherence critique: {plot_result.get('overall_score', 0.0):.2f}")
+                
+            except Exception as e:
+                logger.error(f"Plot coherence critic failed: {e}")
+        
+        # Literary Quality Critic
+        literary_component = self.get_component('literary_quality_critic')
+        if literary_component:
+            try:
+                literary_input = self._create_literary_critic_input(
+                    chapter_variant,
+                    story_state,
+                    llm_context=discrimination_results['llm_critique']
+                )
+                literary_result = await literary_component.execute(literary_input)
+                traditional_results['literary_quality'] = literary_result
+                logger.info(f"Literary quality critique: {literary_result.get('overall_score', 0.0):.2f}")
+                
+            except Exception as e:
+                logger.error(f"Literary quality critic failed: {e}")
+        
+        # Reader Engagement Critic
+        engagement_component = self.get_component('reader_engagement_critic')
+        if engagement_component:
+            try:
+                engagement_input = self._create_engagement_critic_input(
+                    chapter_variant,
+                    story_state,
+                    market_intelligence,
+                    llm_context=discrimination_results['llm_critique']
+                )
+                engagement_result = await engagement_component.execute(engagement_input)
+                traditional_results['reader_engagement'] = engagement_result
+                logger.info(f"Reader engagement critique: {engagement_result.get('overall_score', 0.0):.2f}")
+                
+            except Exception as e:
+                logger.error(f"Reader engagement critic failed: {e}")
+        
+        discrimination_results['traditional_critiques'] = traditional_results
+        
+        # STEP 3: Comparative Analysis
+        if discrimination_results['llm_critique'] and traditional_results:
+            comparative_analysis = self._analyze_critique_agreement(
+                discrimination_results['llm_critique'],
+                traditional_results
+            )
+            discrimination_results['comparative_analysis'] = comparative_analysis
+            logger.info(f"Critique agreement score: {comparative_analysis['agreement_score']:.2f}")
+        
+        # STEP 4: Final Assessment (Weighted combination)
+        final_assessment = self._calculate_final_assessment(discrimination_results)
+        discrimination_results['final_assessment'] = final_assessment
+        
+        logger.info(f"Final assessment score: {final_assessment['weighted_score']:.2f}")
+        
+        return discrimination_results
+    
+    # LLM INTEGRATION HELPER METHODS
+    
+    def _create_plot_critic_input(
+        self, 
+        chapter_variant, 
+        story_state,
+        llm_context: Optional[LLMDiscriminatorOutput] = None
+    ):
+        """Create plot critic input with optional LLM context."""
+        additional_context = {}
+        if llm_context:
+            plot_score = llm_context.dimension_scores.get('plot_coherence', 0.0)
+            additional_context['llm_plot_assessment'] = plot_score
+            additional_context['llm_plot_feedback'] = llm_context.specific_feedback.get('plot', '')
+        
+        return {
+            'chapter_variant': chapter_variant,
+            'story_state': story_state,
+            'additional_context': additional_context
+        }
+    
+    def _create_literary_critic_input(
+        self,
+        chapter_variant,
+        story_state,
+        llm_context: Optional[LLMDiscriminatorOutput] = None
+    ):
+        """Create literary critic input with optional LLM context."""
+        additional_context = {}
+        if llm_context:
+            prose_score = llm_context.dimension_scores.get('prose_quality', 0.0)
+            additional_context['llm_prose_assessment'] = prose_score
+            additional_context['llm_literary_feedback'] = llm_context.specific_feedback.get('literary', '')
+        
+        return {
+            'chapter_variant': chapter_variant,
+            'story_state': story_state,
+            'additional_context': additional_context
+        }
+    
+    def _create_engagement_critic_input(
+        self,
+        chapter_variant,
+        story_state,
+        market_intelligence,
+        llm_context: Optional[LLMDiscriminatorOutput] = None
+    ):
+        """Create engagement critic input with optional LLM context."""
+        additional_context = {}
+        if llm_context:
+            engagement_score = llm_context.dimension_scores.get('reader_engagement', 0.0)
+            additional_context['llm_engagement_assessment'] = engagement_score
+            additional_context['llm_engagement_feedback'] = llm_context.specific_feedback.get('engagement', '')
+        
+        return {
+            'chapter_variant': chapter_variant,
+            'story_state': story_state,
+            'market_intelligence': market_intelligence,
+            'additional_context': additional_context
+        }
+    
+    def _analyze_critique_agreement(
+        self,
+        llm_critique: LLMDiscriminatorOutput,
+        traditional_critiques: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Analyze agreement between LLM and traditional critiques."""
+        
+        agreements = []
+        disagreements = []
+        score_comparisons = {}
+        
+        # Compare scores across comparable dimensions
+        if 'plot_coherence' in traditional_critiques:
+            llm_plot_score = llm_critique.dimension_scores.get('plot_coherence', 0.0)
+            trad_plot_score = traditional_critiques['plot_coherence'].get('overall_score', 0.0)
+            
+            agreement = 1.0 - abs(llm_plot_score - trad_plot_score)
+            score_comparisons['plot_coherence'] = {
+                'llm_score': llm_plot_score,
+                'traditional_score': trad_plot_score,
+                'agreement': agreement
+            }
+            
+            if agreement > 0.7:
+                agreements.append("Plot coherence assessment")
+            elif agreement < 0.3:
+                disagreements.append("Significant plot coherence disagreement")
+        
+        if 'literary_quality' in traditional_critiques:
+            llm_literary_score = llm_critique.dimension_scores.get('prose_quality', 0.0)
+            trad_literary_score = traditional_critiques['literary_quality'].get('overall_score', 0.0)
+            
+            agreement = 1.0 - abs(llm_literary_score - trad_literary_score)
+            score_comparisons['literary_quality'] = {
+                'llm_score': llm_literary_score,
+                'traditional_score': trad_literary_score,
+                'agreement': agreement
+            }
+            
+            if agreement > 0.7:
+                agreements.append("Literary quality assessment")
+            elif agreement < 0.3:
+                disagreements.append("Significant literary quality disagreement")
+        
+        if 'reader_engagement' in traditional_critiques:
+            llm_engagement_score = llm_critique.dimension_scores.get('reader_engagement', 0.0)
+            trad_engagement_score = traditional_critiques['reader_engagement'].get('overall_score', 0.0)
+            
+            agreement = 1.0 - abs(llm_engagement_score - trad_engagement_score)
+            score_comparisons['reader_engagement'] = {
+                'llm_score': llm_engagement_score,
+                'traditional_score': trad_engagement_score,
+                'agreement': agreement
+            }
+            
+            if agreement > 0.7:
+                agreements.append("Reader engagement assessment")
+            elif agreement < 0.3:
+                disagreements.append("Significant engagement disagreement")
+        
+        # Overall agreement score
+        agreement_scores = [comp['agreement'] for comp in score_comparisons.values()]
+        overall_agreement = sum(agreement_scores) / len(agreement_scores) if agreement_scores else 0.5
+        
+        return {
+            'agreement_score': overall_agreement,
+            'score_comparisons': score_comparisons,
+            'agreements': agreements,
+            'disagreements': disagreements,
+            'consensus_strength': 'high' if overall_agreement > 0.8 else 'medium' if overall_agreement > 0.5 else 'low'
+        }
+    
+    def _calculate_final_assessment(self, discrimination_results: Dict[str, Any]) -> Dict[str, Any]:
+        """Calculate final weighted assessment from all discriminators."""
+        
+        # Configurable weights
+        llm_weight = self.config.get('llm_discriminator_weight', 0.6)
+        traditional_weight = 1.0 - llm_weight
+        
+        scores = []
+        
+        # LLM score
+        if discrimination_results['llm_critique']:
+            llm_score = discrimination_results['llm_critique'].overall_score
+            scores.append(('llm', llm_score, llm_weight))
+        
+        # Traditional scores
+        traditional_critiques = discrimination_results['traditional_critiques']
+        if traditional_critiques:
+            # Distribute traditional weight among available critics
+            num_traditional = len(traditional_critiques)
+            individual_traditional_weight = traditional_weight / num_traditional if num_traditional > 0 else 0
+            
+            for critic_name, result in traditional_critiques.items():
+                score = result.get('overall_score', 0.0) if isinstance(result, dict) else getattr(result, 'overall_score', 0.0)
+                scores.append((critic_name, score, individual_traditional_weight))
+        
+        # Calculate weighted score
+        if scores:
+            weighted_score = sum(score * weight for _, score, weight in scores)
+            total_weight = sum(weight for _, _, weight in scores)
+            
+            if total_weight > 0:
+                weighted_score = weighted_score / total_weight
+            else:
+                weighted_score = 0.0
+        else:
+            weighted_score = 0.0
+        
+        # Agreement bonus/penalty
+        comparative_analysis = discrimination_results['comparative_analysis']
+        if comparative_analysis:
+            agreement_score = comparative_analysis['agreement_score']
+            # Slight bonus for high agreement, small penalty for major disagreement
+            if agreement_score > 0.8:
+                weighted_score = min(1.0, weighted_score * 1.02)  # 2% bonus
+            elif agreement_score < 0.3:
+                weighted_score = weighted_score * 0.98  # 2% penalty
+        
+        # Quality threshold check
+        quality_threshold = self.config.get('quality_threshold', 0.75)
+        meets_threshold = weighted_score >= quality_threshold
+        
+        return {
+            'weighted_score': weighted_score,
+            'individual_scores': {name: score for name, score, _ in scores},
+            'weights_applied': {name: weight for name, _, weight in scores},
+            'meets_threshold': meets_threshold,
+            'recommendation': 'accept' if meets_threshold else 'revise',
+            'confidence': comparative_analysis['agreement_score'] if comparative_analysis else 0.5
+        }
+    
+    def _get_previous_chapters_summary(self, story_state):
+        """Get summary of previous chapters for LLM context."""
+        chapters = story_state.get('chapters', {})
+        if not chapters:
+            return "No previous chapters available."
+        
+        # Create a simple summary of previous chapters
+        summaries = []
+        for chapter_id, chapter_data in chapters.items():
+            if isinstance(chapter_data, dict):
+                summary = chapter_data.get('summary', f'Chapter {chapter_id}')
+                summaries.append(summary)
+        
+        return '; '.join(summaries) if summaries else "Previous chapters establish the story foundation."
     
     # PIPELINE OVERRIDES WITH RESEARCH INTEGRATION
     
@@ -588,6 +979,25 @@ async def example_enhanced_pipeline():
             'cache_ttl_hours': 12
         },
         'enable_auto_research': True,
+        'enable_llm_discriminator': True,
+        'llm_discriminator_weight': 0.6,
+        'llm_discriminator': {
+            'model': 'llama3.3:70b',
+            'temperature': 0.2,
+            'max_tokens': 2000,
+            'depth': 'comprehensive',
+            'focus_areas': [
+                'plot_coherence',
+                'character_development',
+                'prose_quality',
+                'pacing',
+                'emotional_resonance',
+                'market_appeal'
+            ],
+            'strictness': 0.75,
+            'include_suggestions': True,
+            'max_time': 90
+        },
         'components': {
             'market_intelligence': 'MarketIntelligenceComponent',
             'plot_outliner': 'PlotOutlineComponent',

@@ -13,7 +13,7 @@ from enum import Enum
 import json
 import uuid
 from pydantic import Field, BaseModel
-
+import logging
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError,
     component_registry
@@ -30,7 +30,12 @@ from musequill.v3.components.quality_control.comprehensive_quality_controller im
     QualityControllerInput, ComprehensiveQualityAssessment, QualityDecision
 )
 from musequill.v3.components.market_intelligence.market_intelligence_engine import MarketIntelligenceEngineInput
+from musequill.v3.components.discriminators.llm_discriminator import LLMDiscriminator, LLMDiscriminatorConfig
+from musequill.v3.models.llm_discriminator_models import (
+    CritiqueDimension
+)
 
+logger = logging.getLogger(__name__)
 
 class PipelineState(str, Enum):
     """States of the pipeline execution."""
@@ -224,7 +229,8 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         self._reader_engagement_critic = None
         self._quality_controller = None
         self._market_intelligence_engine = None
-        
+        self._llm_discriminator = None
+
         # Pipeline state
         self.pipeline_state = PipelineState.IDLE
         self._current_execution_id: Optional[str] = None
@@ -416,6 +422,28 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         # This is a placeholder showing the pattern
         pass
     
+    def _create_llm_discriminator_config(self) -> LLMDiscriminatorConfig:
+        """Create LLM discriminator configuration from pipeline config."""
+        llm_settings = self.config.get('llm_discriminator', {})
+        
+        return LLMDiscriminatorConfig(
+            llm_model_name=llm_settings.get('model', "llama3.3:70b"),
+            analysis_temperature=llm_settings.get('temperature', 0.2),
+            max_analysis_tokens=llm_settings.get('max_tokens', 2000),
+            critique_depth=llm_settings.get('depth', "comprehensive"),
+            focus_areas=llm_settings.get('focus_areas', [
+                CritiqueDimension.PLOT_COHERENCE.value,
+                CritiqueDimension.CHARACTER_DEVELOPMENT.value,
+                CritiqueDimension.PROSE_QUALITY.value,
+                CritiqueDimension.PACING.value,
+                CritiqueDimension.EMOTIONAL_RESONANCE.value,
+                CritiqueDimension.MARKET_APPEAL.value
+            ]),
+            scoring_strictness=llm_settings.get('strictness', 0.75),
+            include_suggestions=llm_settings.get('include_suggestions', True),
+            max_analysis_time_seconds=llm_settings.get('max_time', 90)
+        )
+
     async def _initialize_all_components(self) -> bool:
         """Initialize all pipeline components."""
         try:
@@ -474,7 +502,25 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 )
                 self._market_intelligence_engine = component_registry.get_component(mi_id)
                 await self._market_intelligence_engine.start()
-            
+
+            if 'llm_discriminator' in component_config:
+                llm_config = self._create_llm_discriminator_config()
+                component_config = ComponentConfiguration(
+                    component_type=ComponentType.DISCRIMINATOR,
+                    component_name="LLM Literary Discriminator",
+                    version="1.0.0",
+                    max_concurrent_executions=1,
+                    execution_timeout_seconds=120,
+                    specific_config=llm_config
+                )
+                
+                self._llm_discriminator = LLMDiscriminator(component_config)
+                if await self._llm_discriminator.initialize():
+                    logger.info("✅ LLM Discriminator initialized successfully")
+                else:
+                    logger.error("❌ Failed to initialize LLM Discriminator")
+                    self._llm_discriminator = None
+
             return True
             
         except Exception as e:

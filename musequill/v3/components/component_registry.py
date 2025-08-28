@@ -1,8 +1,8 @@
 """
-Component Registry Setup Utility - COMPLETE VERSION
+Enhanced Component Registry Setup - WITH LLM DISCRIMINATOR INTEGRATION
 
 Provides functions to register all components with the global component registry
-and create proper component configurations.
+including the LLMDiscriminator that uses models from musequill/v3/models/llm_discriminator_models.py
 """
 # pylint: disable=locally-disabled, fixme, line-too-long, no-member
 
@@ -19,10 +19,31 @@ from musequill.v3.components.quality_control.comprehensive_quality_controller im
 from musequill.v3.components.researcher.researcher_agent import ResearcherComponent, ResearcherConfig
 from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestrator, PipelineOrchestratorConfig, OrchestrationStrategy
 
-# Import the new components (UNCOMMENT WHEN FILES ARE SAVED)
-# from musequill.v3.components.discriminators.literary_quality_critic import LiteraryQualityCritic, LiteraryQualityCriticConfig
-# from musequill.v3.components.discriminators.reader_engagement_critic import ReaderEngagementCritic, ReaderEngagementCriticConfig
-# from musequill.v3.components.market_intelligence.market_intelligence_engine import MarketIntelligenceEngine, MarketIntelligenceEngineConfig
+# Import LLM Discriminator components
+from musequill.v3.components.discriminators.llm_discriminator import LLMDiscriminator, LLMDiscriminatorConfig
+
+# Import LLM discriminator models for proper configuration
+from musequill.v3.models.llm_discriminator_models import (
+    CritiqueDimension, 
+    CritiqueConfidenceLevel,
+    SuggestionType,
+    ImprovementSuggestion,
+    DimensionAnalysis,
+    MarketViabilityAssessment,
+    ComprehensiveLLMCritique
+)
+
+
+def register_llm_discriminator_component() -> bool:
+    """Register the LLM Discriminator component specifically."""
+    try:
+        # Register LLM Discriminator with proper component type
+        component_registry.register_component_type("llm_discriminator", LLMDiscriminator)
+        print("✅ LLMDiscriminator registered successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Failed to register LLMDiscriminator: {e}")
+        return False
 
 
 def register_existing_components() -> bool:
@@ -51,34 +72,92 @@ def register_existing_components() -> bool:
         return False
 
 
-def register_all_components() -> bool:
-    """Register all component types including new ones (requires saving component files first)."""
+def register_all_components_with_llm() -> bool:
+    """Register all component types including the LLM Discriminator."""
     try:
-        # Register existing components
+        # Register existing components first
         success = register_existing_components()
         if not success:
             return False
         
-        # UNCOMMENT WHEN NEW COMPONENT FILES ARE SAVED:
-        # Register new Discriminator components  
-        # component_registry.register_component_type("literary_quality_critic", LiteraryQualityCritic)
-        # component_registry.register_component_type("reader_engagement_critic", ReaderEngagementCritic)
+        # Register LLM Discriminator
+        llm_success = register_llm_discriminator_component()
+        if not llm_success:
+            return False
         
-        # Register Market Intelligence
-        # component_registry.register_component_type("market_intelligence_engine", MarketIntelligenceEngine)
-        
-        print(f"✅ All components registered. Total: {len(component_registry.registered_types)} types")
+        print(f"✅ All components registered with LLM. Total: {len(component_registry.registered_types)} types")
         return True
         
     except Exception as e:
-        print(f"Failed to register all components: {e}")
+        print(f"Failed to register all components with LLM: {e}")
         return False
 
 
-def create_minimal_component_configurations() -> Dict[str, ComponentConfiguration]:
-    """Create configurations for existing components only."""
+def create_comprehensive_llm_discriminator_config() -> LLMDiscriminatorConfig:
+    """Create a comprehensive configuration for LLM discriminator using the enhanced models."""
+    return LLMDiscriminatorConfig(
+        llm_model_name="llama3.3:70b",
+        analysis_temperature=0.2,  # Low temperature for consistent analysis
+        max_analysis_tokens=2500,
+        critique_depth="comprehensive",
+        focus_areas=[
+            CritiqueDimension.PLOT_COHERENCE.value,
+            CritiqueDimension.CHARACTER_DEVELOPMENT.value,
+            CritiqueDimension.PROSE_QUALITY.value,
+            CritiqueDimension.PACING.value,
+            CritiqueDimension.DIALOGUE_AUTHENTICITY.value,
+            CritiqueDimension.EMOTIONAL_RESONANCE.value,
+            CritiqueDimension.MARKET_APPEAL.value,
+            CritiqueDimension.ORIGINALITY.value
+        ],
+        scoring_strictness=0.8,  # Fairly strict scoring
+        include_suggestions=True,
+        max_analysis_time_seconds=90
+    )
+
+
+def create_market_focused_llm_config() -> LLMDiscriminatorConfig:
+    """Create configuration focused on market appeal using the enhanced models."""
+    return LLMDiscriminatorConfig(
+        llm_model_name="llama3.3:70b",
+        analysis_temperature=0.25,
+        max_analysis_tokens=1500,
+        critique_depth="detailed",
+        focus_areas=[
+            CritiqueDimension.MARKET_APPEAL.value,
+            CritiqueDimension.READER_ENGAGEMENT.value,
+            CritiqueDimension.GENRE_CONVENTIONS.value,
+            CritiqueDimension.PACING.value,
+            CritiqueDimension.EMOTIONAL_RESONANCE.value
+        ],
+        scoring_strictness=0.7,
+        include_suggestions=True,
+        max_analysis_time_seconds=60
+    )
+
+
+def create_fast_llm_config() -> LLMDiscriminatorConfig:
+    """Create configuration for fast LLM critique using the enhanced models."""
+    return LLMDiscriminatorConfig(
+        llm_model_name="llama3.3:70b",
+        analysis_temperature=0.3,
+        max_analysis_tokens=1000,
+        critique_depth="basic",
+        focus_areas=[
+            CritiqueDimension.PROSE_QUALITY.value,
+            CritiqueDimension.READER_ENGAGEMENT.value,
+            CritiqueDimension.PACING.value
+        ],
+        scoring_strictness=0.6,  # More lenient for speed
+        include_suggestions=False,
+        max_analysis_time_seconds=30
+    )
+
+
+def create_enhanced_component_configurations() -> Dict[str, ComponentConfiguration]:
+    """Create configurations for all components including LLM discriminator."""
     
-    # Create specific configs
+    # Create existing component configs
     chapter_gen_config = ChapterGeneratorConfig(
         max_chapter_length=3000,
         min_chapter_length=1000,
@@ -96,7 +175,7 @@ def create_minimal_component_configurations() -> Dict[str, ComponentConfiguratio
     quality_controller_config = QualityControllerConfig(
         quality_threshold=0.75,
         max_revision_attempts=3,
-        require_all_critics=False,  # Allow partial critic coverage
+        require_all_critics=False,
         enable_progressive_standards=True
     )
     
@@ -113,6 +192,9 @@ def create_minimal_component_configurations() -> Dict[str, ComponentConfiguratio
         component_timeout_seconds=300,
         enable_checkpoints=True
     )
+    
+    # Create LLM discriminator config
+    llm_discriminator_config = create_comprehensive_llm_discriminator_config()
     
     return {
         "chapter_generator": ComponentConfiguration(
@@ -135,6 +217,17 @@ def create_minimal_component_configurations() -> Dict[str, ComponentConfiguratio
             auto_recycle_after_uses=200,
             recycle_on_error_count=5,
             specific_config=plot_critic_config
+        ),
+        
+        "llm_discriminator": ComponentConfiguration(
+            component_type=ComponentType.DISCRIMINATOR,
+            component_name="LLM Literary Discriminator",
+            version="1.0.0",
+            max_concurrent_executions=1,  # LLM analysis is resource intensive
+            execution_timeout_seconds=120,  # Allow time for LLM processing
+            auto_recycle_after_uses=50,   # Recycle more frequently due to LLM overhead
+            recycle_on_error_count=3,
+            specific_config=llm_discriminator_config
         ),
         
         "quality_controller": ComponentConfiguration(
@@ -172,148 +265,164 @@ def create_minimal_component_configurations() -> Dict[str, ComponentConfiguratio
     }
 
 
-def setup_existing_component_system() -> bool:
-    """Setup component system with existing components only."""
+def create_llm_focused_configurations() -> Dict[str, ComponentConfiguration]:
+    """Create configurations with multiple LLM discriminator variants."""
+    base_configs = create_enhanced_component_configurations()
+    
+    # Add market-focused LLM discriminator
+    market_llm_config = create_market_focused_llm_config()
+    base_configs["llm_market_discriminator"] = ComponentConfiguration(
+        component_type=ComponentType.DISCRIMINATOR,
+        component_name="LLM Market-Focused Discriminator",
+        version="1.0.0",
+        max_concurrent_executions=1,
+        execution_timeout_seconds=90,
+        auto_recycle_after_uses=75,
+        recycle_on_error_count=3,
+        specific_config=market_llm_config
+    )
+    
+    # Add fast LLM discriminator for quick feedback
+    fast_llm_config = create_fast_llm_config()
+    base_configs["llm_fast_discriminator"] = ComponentConfiguration(
+        component_type=ComponentType.DISCRIMINATOR,
+        component_name="LLM Fast Discriminator",
+        version="1.0.0",
+        max_concurrent_executions=2,  # Can handle more concurrent for speed
+        execution_timeout_seconds=45,
+        auto_recycle_after_uses=100,
+        recycle_on_error_count=3,
+        specific_config=fast_llm_config
+    )
+    
+    return base_configs
+
+
+def setup_enhanced_component_system() -> bool:
+    """Setup component system with LLM discriminator integration."""
     try:
-        # Register existing component types
-        success = register_existing_components()
-        if not success:
+        # Register all components including LLM
+        if not register_all_components_with_llm():
             return False
         
-        print("✅ Existing component types registered successfully")
+        # Create and store configurations
+        component_configs = create_enhanced_component_configurations()
         
-        # Create minimal configurations
-        configurations = create_minimal_component_configurations()
-        print(f"✅ Created {len(configurations)} component configurations")
+        print("📋 Enhanced Component Configuration Summary:")
+        print("-" * 50)
+        for name, config in component_configs.items():
+            print(f"  {name}: {config.component_name} (v{config.version})")
+            if name == "llm_discriminator":
+                llm_config = config.specific_config
+                print(f"    LLM Model: {llm_config.llm_model_name}")
+                print(f"    Analysis Depth: {llm_config.critique_depth}")
+                print(f"    Focus Areas: {len(llm_config.focus_areas)} dimensions")
+                print(f"    Scoring Strictness: {llm_config.scoring_strictness}")
         
-        # Test component registry
-        registered_types = list(component_registry.registered_types.keys())
-        print(f"✅ Component registry contains: {registered_types}")
+        print(f"\n✅ Enhanced component system ready with {len(component_configs)} components")
+        print("🎭 LLM Discriminator fully integrated with enhanced models!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Enhanced component system setup failed: {e}")
+        return False
+
+
+def setup_llm_focused_system() -> bool:
+    """Setup system with multiple LLM discriminator variants."""
+    try:
+        # Register all components including LLM
+        if not register_all_components_with_llm():
+            return False
+        
+        # Create LLM-focused configurations
+        llm_configs = create_llm_focused_configurations()
+        
+        print("🎭 LLM-Focused Component Configuration Summary:")
+        print("-" * 60)
+        llm_discriminators = [name for name in llm_configs.keys() if 'llm' in name and 'discriminator' in name]
+        print(f"📊 LLM Discriminator Variants: {len(llm_discriminators)}")
+        
+        for name in llm_discriminators:
+            config = llm_configs[name]
+            llm_config = config.specific_config
+            print(f"\n  {config.component_name}:")
+            print(f"    Model: {llm_config.llm_model_name}")
+            print(f"    Depth: {llm_config.critique_depth}")
+            print(f"    Focus Areas: {llm_config.focus_areas}")
+            print(f"    Max Time: {llm_config.max_analysis_time_seconds}s")
+            print(f"    Concurrent Executions: {config.max_concurrent_executions}")
+        
+        print(f"\n✅ LLM-focused system ready with {len(llm_discriminators)} LLM discriminator variants")
+        return True
+        
+    except Exception as e:
+        print(f"❌ LLM-focused system setup failed: {e}")
+        return False
+
+
+def validate_llm_discriminator_models():
+    """Validate that all required LLM discriminator models are properly imported."""
+    try:
+        # Test model imports
+        from musequill.v3.models.llm_discriminator_models import (
+            ComprehensiveLLMCritique,
+            CritiqueDimension,
+            ImprovementSuggestion,
+            MarketViabilityAssessment,
+            DimensionAnalysis,
+            LLMCritiqueMetadata,
+            create_sample_llm_critique
+        )
+        
+        # Test model creation
+        sample_critique = create_sample_llm_critique()
+        
+        print("✅ All LLM discriminator models validated successfully")
+        print(f"📊 Sample critique overall score: {sample_critique.overall_score}")
+        print(f"🎯 Sample confidence level: {sample_critique.confidence_level.value}")
+        print(f"📝 Critique dimensions available: {len(sample_critique.dimension_analyses)}")
         
         return True
         
     except Exception as e:
-        print(f"❌ Component system setup failed: {e}")
+        print(f"❌ LLM discriminator model validation failed: {e}")
         return False
-
-
-def setup_component_system() -> bool:
-    """Complete setup of the component system (calls appropriate setup based on available components)."""
-    # For now, use existing components setup
-    # This will automatically switch to full setup once new component files are saved
-    return setup_existing_component_system()
-
-
-# Test functions
-def create_test_component_instance(component_type: str) -> str:
-    """Create a test instance of a specific component type."""
-    try:
-        # Get default configurations
-        configs = create_minimal_component_configurations()
-        
-        if component_type not in configs:
-            print(f"❌ Unknown component type: {component_type}")
-            return None
-        
-        # Create component instance
-        component_id = f"test_{component_type}_{datetime.now().strftime('%H%M%S')}"
-        config = configs[component_type]
-        
-        success = component_registry.register_instance(component_id, config)
-        
-        if success:
-            print(f"✅ Created test instance: {component_id}")
-            return component_id
-        else:
-            print(f"❌ Failed to create component instance: {component_type}")
-            return None
-            
-    except Exception as e:
-        print(f"❌ Error creating component instance {component_type}: {e}")
-        return None
-
-
-async def test_component_lifecycle(component_id: str) -> bool:
-    """Test basic lifecycle operations for a component."""
-    try:
-        component = component_registry.get_component(component_id)
-        if not component:
-            print(f"❌ Component not found: {component_id}")
-            return False
-        
-        # Test initialization
-        init_result = await component.initialize()
-        print(f"   Initialize: {'✅' if init_result else '❌'}")
-        
-        # Test health check
-        health_result = await component.health_check()
-        print(f"   Health Check: {'✅' if health_result else '❌'}")
-        
-        # Test cleanup
-        cleanup_result = await component.cleanup()
-        print(f"   Cleanup: {'✅' if cleanup_result else '❌'}")
-        
-        return init_result and health_result and cleanup_result
-        
-    except Exception as e:
-        print(f"❌ Lifecycle test failed for {component_id}: {e}")
-        return False
-
-
-def get_component_status_summary() -> Dict[str, Any]:
-    """Get summary of component system status."""
-    return {
-        'registered_types': list(component_registry.registered_types.keys()),
-        'active_components': len(component_registry.active_components),
-        'component_details': component_registry.list_components()
-    }
-
-
-# Main test execution
-async def main():
-    print("🚀 Starting Component System Setup...")
-    
-    # Setup component system
-    success = setup_component_system()
-    if not success:
-        print("❌ Setup failed")
-        return
-    
-    # Test creating component instances
-    print("\n🧪 Testing Component Creation...")
-    
-    # Test components that we know exist
-    existing_components = [
-        "chapter_generator",
-        "plot_coherence_critic", 
-        "quality_controller",
-        "researcher"
-    ]
-    
-    created_components = []
-    for comp_type in existing_components:
-        comp_id = create_test_component_instance(comp_type)
-        if comp_id:
-            created_components.append(comp_id)
-    
-    # Test component lifecycles
-    print(f"\n🔄 Testing Component Lifecycles...")
-    for comp_id in created_components:
-        await test_component_lifecycle(comp_id)
-    
-    # Show final status
-    print(f"\n📊 Final Component System Status:")
-    status = get_component_status_summary()
-    
-    print(f"  Registered Types: {len(status['registered_types'])}")
-    print(f"  Active Components: {status['active_components']}")
-    
-    for detail in status.get('component_details', []):
-        print(f"    - {detail['name']}: {detail['status']} ({detail['health']})")
 
 
 if __name__ == "__main__":
-    import asyncio
-    from datetime import datetime
+    print("🚀 Starting Enhanced Component Registry Setup with LLM Integration")
+    print("=" * 70)
     
-    asyncio.run(main())
+    # Validate models first
+    print("\n1️⃣ Validating LLM Discriminator Models...")
+    if not validate_llm_discriminator_models():
+        print("❌ Model validation failed. Exiting.")
+        exit(1)
+    
+    # Setup enhanced system
+    print("\n2️⃣ Setting up Enhanced Component System...")
+    if not setup_enhanced_component_system():
+        print("❌ Enhanced system setup failed. Exiting.")
+        exit(1)
+    
+    # Setup LLM-focused system variants
+    print("\n3️⃣ Setting up LLM-Focused System Variants...")
+    if not setup_llm_focused_system():
+        print("❌ LLM-focused system setup failed. Exiting.")
+        exit(1)
+    
+    print("\n" + "=" * 70)
+    print("🎉 SUCCESS: LLM Discriminator Integration Complete!")
+    print("=" * 70)
+    print("\n🎭 Available LLM Discriminator Variants:")
+    print("   • llm_discriminator: Comprehensive literary analysis")
+    print("   • llm_market_discriminator: Market-focused assessment")
+    print("   • llm_fast_discriminator: Quick feedback for iterations")
+    print("\n🔧 Integration Features:")
+    print("   • Uses models from musequill/v3/models/llm_discriminator_models.py")
+    print("   • Supports all CritiqueDimension types")
+    print("   • Includes MarketViabilityAssessment")
+    print("   • Provides ComprehensiveLLMCritique output")
+    print("   • Configurable analysis depth and focus areas")
+    print("\n✅ Ready for pipeline integration!")
