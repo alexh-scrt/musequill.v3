@@ -22,6 +22,7 @@ from musequill.v3.models.chapter_objective import ChapterObjective
 from musequill.v3.models.chapter_variant import ChapterVariant
 from musequill.v3.models.dynamic_story_state import DynamicStoryState
 from musequill.v3.models.market_intelligence import MarketIntelligence
+from musequill.v3.components.market_intelligence.market_intelligence_engine import MarketIntelligenceEngineConfig
 from musequill.v3.components.generators.chapter_generator import ChapterGeneratorInput, ChapterGeneratorOutput
 from musequill.v3.components.discriminators.plot_coherence_critic import PlotCoherenceCriticInput
 from musequill.v3.components.discriminators.literary_quality_critic import LiteraryQualityCriticInput
@@ -460,6 +461,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                     component_configs['chapter_generator']
                 )
                 self._chapter_generator = component_registry.get_component(generator_id)
+                await self._chapter_generator.initialize()
                 await self._chapter_generator.start()
             
             # Initialize Critics
@@ -469,6 +471,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                     component_configs['plot_coherence_critic']
                 )
                 self._plot_coherence_critic = component_registry.get_component(critic_id)
+                await self._plot_coherence_critic.initialize()
                 await self._plot_coherence_critic.start()
             
             if 'literary_quality_critic' in component_configs:
@@ -477,6 +480,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                     component_configs['literary_quality_critic']
                 )
                 self._literary_quality_critic = component_registry.get_component(critic_id)
+                await self._literary_quality_critic.initialize()
                 await self._literary_quality_critic.start()
             
             if 'reader_engagement_critic' in component_configs:
@@ -485,6 +489,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                     component_configs['reader_engagement_critic']
                 )
                 self._reader_engagement_critic = component_registry.get_component(critic_id)
+                await self._reader_engagement_critic.initialize()
                 await self._reader_engagement_critic.start()
             
             # Initialize Quality Controller
@@ -494,15 +499,17 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                     component_configs['quality_controller']
                 )
                 self._quality_controller = component_registry.get_component(controller_id)
+                await self._quality_controller.initialize()
                 await self._quality_controller.start()
             
             # Initialize Market Intelligence Engine
-            if 'market_intelligence_engine' in component_configs:
+            if 'market_intelligence' in component_configs:
                 mi_id = component_registry.create_component(
-                    'market_intelligence_engine',
-                    component_configs['market_intelligence_engine']
+                    'market_intelligence',
+                    component_configs['market_intelligence']
                 )
                 self._market_intelligence_engine = component_registry.get_component(mi_id)
+                await self._market_intelligence_engine.initialize()
                 await self._market_intelligence_engine.start()
 
             if 'llm_discriminator' in component_configs:
@@ -532,6 +539,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
     async def _create_component_configurations(self) -> Dict[str, ComponentConfiguration]:
         """Create configurations for all pipeline components."""
         # Placeholder - in real implementation would load from config files
+        config = self.config.specific_config.components
         return {
             'chapter_generator': ComponentConfiguration(
                 component_type=ComponentType.GENERATOR,
@@ -563,10 +571,12 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 component_name="Comprehensive Quality Controller",
                 specific_config={}
             ),
-            'market_intelligence_engine': ComponentConfiguration(
+            'market_intelligence': ComponentConfiguration(
                 component_type=ComponentType.MARKET_INTELLIGENCE,
                 component_name="Market Intelligence Engine",
-                specific_config={}
+                specific_config=MarketIntelligenceEngineConfig(
+                    **config['market_intelligence']
+                )  
             )
         }
     

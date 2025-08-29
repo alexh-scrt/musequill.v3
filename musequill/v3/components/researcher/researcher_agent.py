@@ -10,7 +10,7 @@ import asyncio
 import hashlib
 import re
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Optional, Tuple, Set, cast, Iterable
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -32,7 +32,7 @@ from musequill.v3.components.base.component_interface import (
 
 # Import the existing model definitions
 from musequill.v3.models.researcher_agent_model import (
-    QueryStatus, SearchResult, ProcessedChunk, ResearchResults, ResearchQuery
+    QueryStatus, SearchResult, ProcessedChunk, ResearchResults, ResearchQuery, ResearchQueryEx
 )
 
 # Import the existing configuration (adjust path as needed)
@@ -45,14 +45,14 @@ logger = logging.getLogger(__name__)
 class ResearcherInput(BaseModel):
     """Input model for researcher component."""
     research_id: str = Field(description="Unique identifier for the research session")
-    queries: List[ResearchQuery] = Field(description="List of research queries to execute")
+    queries: List[ResearchQueryEx] = Field(description="List of research queries to execute")
     force_refresh: bool = Field(default=False, description="Force refresh of cached results")
 
 
 class ResearcherOutput(BaseModel):
     """Output model for researcher component."""
     research_id: str = Field(description="Research session identifier")
-    updated_queries: List[ResearchQuery] = Field(description="Updated queries with results")
+    updated_queries: List[ResearchQueryEx] = Field(description="Updated queries with results")
     total_chunks: int = Field(description="Total chunks stored")
     total_sources: int = Field(description="Total sources processed")
     stats: Dict[str, Any] = Field(description="Execution statistics")
@@ -75,6 +75,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
         self.tavily_client: Optional[TavilyClient] = None
         self.chroma_client: Optional[chromadb.HttpClient] = None
         self.chroma_collection = None
+        self.chroma_cache_collection = None  # For query caching
         self.embeddings: Optional[OllamaEmbeddings] = None
         self.text_splitter: Optional[RecursiveCharacterTextSplitter] = None
         
@@ -114,6 +115,11 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
                 self.config.specific_config
             )
             
+            # Get or create cache collection for query results
+            self.chroma_cache_collection = self._get_or_create_cache_collection_safe(
+                self.config.specific_config
+            )
+            
             # Initialize Ollama embeddings
             self.embeddings = OllamaEmbeddings(
                 base_url=self.config.specific_config.ollama_base_url,
@@ -143,7 +149,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             
             # Execute research queries
             results = await self._execute_queries_concurrently(
-                input_data.queries, 
+                input_data.queries,
                 input_data.research_id
             )
             
@@ -235,6 +241,9 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             self.content_hashes.clear()
             self.processed_urls.clear()
             
+            # Clear cache collection reference
+            self.chroma_cache_collection = None
+            
             logger.info(f"Researcher component {self.config.component_id} cleaned up successfully")
             return True
             
@@ -314,6 +323,153 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             logger.error(f"Failed to create new collection: {e}")
             raise
     
+    def _get_or_create_cache_collection_safe(self, config: ResearcherConfig):
+        """Safely get or create ChromaDB collection for query caching."""
+        cache_collection_name = f"{config.chroma_collection_name}_query_cache"
+        
+        try:
+            # Try to get existing cache collection
+            collection = self.chroma_client.get_collection(name=cache_collection_name)
+            logger.info(f"Using existing query cache collection '{cache_collection_name}'")
+            return collection
+            
+        except (Exception, NotFoundError):
+            # Collection doesn't exist, create new one
+            logger.info(f"Creating new query cache collection '{cache_collection_name}'")
+            return self._create_new_cache_collection(cache_collection_name)
+    
+    def _create_new_cache_collection(self, collection_name: str):
+        """Create a new ChromaDB collection for query caching."""
+        try:
+            collection = self.chroma_client.create_collection(
+                name=collection_name,
+                metadata={
+                    "type": "query_cache",
+                    "created_at": datetime.now().isoformat(),
+                    "description": "Cached query results with 30-day TTL"
+                }
+            )
+            logger.info(f"Created new query cache collection '{collection_name}'")
+            return collection
+        except Exception as e:
+            logger.error(f"Failed to create new cache collection: {e}")
+            raise
+    
+    def _generate_query_hash(self, query: str) -> str:
+        """Generate a SHA-256 hash for the query string."""
+        return sha256(query.strip().lower().encode('utf-8')).hexdigest()
+    
+    async def _check_query_cache(self, query_hash: str) -> Optional[List[ResearchResults]]:
+        """Check if query results exist in cache and are not older than 30 days."""
+        try:
+            # Query cache collection for this hash
+            cache_results = self.chroma_cache_collection.get(
+                ids=[query_hash],
+                include=["metadatas", "documents"]
+            )
+            
+            if not cache_results['ids'] or len(cache_results['ids']) == 0:
+                return None
+            
+            # Check if cache entry is still valid (within 30 days)
+            metadata = cache_results['metadatas'][0] if cache_results['metadatas'] else {}
+            cached_at_str = metadata.get('cached_at')
+            
+            if cached_at_str:
+                cached_at = datetime.fromisoformat(cached_at_str.replace('Z', '+00:00'))
+                if datetime.now(timezone.utc) - cached_at > timedelta(days=30):
+                    logger.info(f"Cache entry for query hash {query_hash} is older than 30 days, ignoring")
+                    return None
+            
+            # Deserialize cached results
+            cached_data = cache_results['documents'][0] if cache_results['documents'] else None
+            if cached_data:
+                import json
+                try:
+                    results_data = json.loads(cached_data)
+                    # Convert back to ResearchResults objects
+                    cached_results = []
+                    for result_data in results_data:
+                        # Recreate SearchResult objects
+                        search_results = []
+                        for sr_data in result_data.get('search_results', []):
+                            search_result = SearchResult(**sr_data)
+                            search_results.append(search_result)
+                        
+                        # Create ResearchResults object
+                        research_result = ResearchResults(
+                            query=result_data['query'],
+                            search_results=search_results,
+                            processed_chunks=[],  # Don't store full chunks in cache
+                            total_chunks_stored=result_data['total_chunks_stored'],
+                            total_sources=result_data['total_sources'],
+                            quality_stats=result_data['quality_stats'],
+                            execution_time=result_data['execution_time'],
+                            status=result_data['status'],
+                            error_message=result_data.get('error_message')
+                        )
+                        cached_results.append(research_result)
+                    
+                    logger.info(f"Retrieved {len(cached_results)} cached results for query hash {query_hash}")
+                    return cached_results
+                    
+                except (json.JSONDecodeError, KeyError, TypeError) as e:
+                    logger.warning(f"Failed to deserialize cached results: {e}")
+                    return None
+            
+        except Exception as e:
+            logger.warning(f"Error checking query cache: {e}")
+        
+        return None
+    
+    async def _store_query_cache(self, query_hash: str, query: str, results: List[ResearchResults]):
+        """Store query results in cache with TTL metadata."""
+        try:
+            import json
+            
+            # Serialize results to JSON (excluding ProcessedChunk objects to save space)
+            serializable_results = []
+            for result in results:
+                result_data = {
+                    'query': result.query,
+                    'search_results': [{
+                        'url': sr.url,
+                        'title': sr.title,
+                        'content': sr.content,
+                        'score': sr.score,
+                        'published_date': sr.published_date,
+                        'domain': sr.domain,
+                        'query': sr.query,
+                        'tavily_answer': sr.tavily_answer
+                    } for sr in result.search_results],
+                    'total_chunks_stored': result.total_chunks_stored,
+                    'total_sources': result.total_sources,
+                    'quality_stats': result.quality_stats,
+                    'execution_time': result.execution_time,
+                    'status': result.status,
+                    'error_message': result.error_message
+                }
+                serializable_results.append(result_data)
+            
+            cached_data = json.dumps(serializable_results)
+            
+            # Store in cache collection
+            self.chroma_cache_collection.upsert(
+                ids=[query_hash],
+                documents=[cached_data],
+                metadatas=[{
+                    'original_query': query,
+                    'cached_at': datetime.now(timezone.utc).isoformat(),
+                    'result_count': len(results),
+                    'cache_type': 'query_results'
+                }]
+            )
+            
+            logger.info(f"Stored {len(results)} results in cache for query hash {query_hash}")
+            
+        except Exception as e:
+            logger.error(f"Failed to store query cache: {e}")
+    
     # Private methods from the original implementation
     async def _execute_queries_concurrently(
         self, 
@@ -344,7 +500,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
         
         return results
     
-    def _sort_research_queries_by_priority(self, queries: List[ResearchQuery]) -> List[ResearchQuery]:
+    def _sort_research_queries_by_priority(self, queries: List[ResearchQueryEx]) -> List[ResearchQuery]:
         """Sort queries by priority."""
         priority_order = {'High': 1, 'Medium': 2, 'Low': 3}
         return sorted(
@@ -354,7 +510,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
     
     async def _execute_query_batch(
         self, 
-        queries: List[ResearchQuery], 
+        queries: List[ResearchQueryEx], 
         research_id: str
     ) -> Dict[str, List[ResearchResults]]:
         """Execute a batch of queries concurrently."""
@@ -386,71 +542,81 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
     
     async def _research_single_query(
         self, 
-        query: ResearchQuery, 
+        query: ResearchQueryEx,
         research_id: str
     ) -> List[ResearchResults]:
-        """Research a single query with retries."""
+        """Research a single query with retries and caching."""
         results: List[ResearchResults] = []
         start_time = time.time()
         
-        main_query: str = query.get_query()
-        research_queries: List[str] = query.get_questions() or []
-        research_queries.append(main_query)
+        _query: str = query.get_query()
         
-        for _query in research_queries:
-            for attempt in range(self.config.specific_config.query_retry_attempts):
-                try:
-                    logger.info(f"Executing query [{_query}] (attempt {attempt + 1})")
-                    
-                    # Perform web search
-                    search_results = await self._perform_web_search(_query)
-                    
-                    # Filter and validate results
-                    filtered_results = self._filter_search_results(search_results)
-                    
-                    # Process content and create chunks
-                    processed_chunks = await self._process_search_results(
-                        filtered_results, query, research_id
-                    )
-                    
-                    # Store chunks in vector database
-                    chunks_stored = await self._store_chunks_in_chroma(processed_chunks, research_id)
-                    
-                    # Calculate quality statistics
-                    quality_stats = self._calculate_quality_stats(processed_chunks)
-                    
-                    execution_time = time.time() - start_time
-                    
+        # Generate query hash for caching
+        query_hash = self._generate_query_hash(_query)
+        
+        # Check cache first
+        cached_results = await self._check_query_cache(query_hash)
+        if cached_results is not None:
+            logger.info(f"Using cached results for query: {_query[:50]}...")
+            return cached_results
+        
+        for attempt in range(self.config.specific_config.query_retry_attempts):
+            try:
+                logger.info(f"Executing query [{_query}] (attempt {attempt + 1})")
+                
+                # Perform web search
+                search_results = await self._perform_web_search(_query)
+                
+                # Filter and validate results
+                filtered_results = self._filter_search_results(search_results)
+                
+                # Process content and create chunks
+                processed_chunks = await self._process_search_results(
+                    filtered_results, query, research_id
+                )
+                
+                # Store chunks in vector database
+                chunks_stored = await self._store_chunks_in_chroma(processed_chunks, research_id)
+                
+                # Calculate quality statistics
+                quality_stats = self._calculate_quality_stats(processed_chunks)
+                
+                execution_time = time.time() - start_time
+                
+                result = ResearchResults(
+                    query=query.category or "unknown",
+                    search_results=filtered_results,
+                    processed_chunks=[],  # Don't include full chunks in response
+                    total_chunks_stored=chunks_stored,
+                    total_sources=len(filtered_results),
+                    quality_stats=quality_stats,
+                    execution_time=execution_time,
+                    status='completed'
+                )
+                
+                results.append(result)
+                
+                # Store successful results in cache
+                await self._store_query_cache(query_hash, _query, results)
+                
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                logger.error(f"Query attempt {attempt + 1} failed: {e}")
+                if attempt == self.config.specific_config.query_retry_attempts - 1:
+                    # Final attempt failed
                     result = ResearchResults(
                         query=query.category or "unknown",
-                        search_results=filtered_results,
-                        processed_chunks=[],  # Don't include full chunks in response
-                        total_chunks_stored=chunks_stored,
-                        total_sources=len(filtered_results),
-                        quality_stats=quality_stats,
-                        execution_time=execution_time,
-                        status='completed'
+                        search_results=[],
+                        processed_chunks=[],
+                        total_chunks_stored=0,
+                        total_sources=0,
+                        quality_stats={},
+                        execution_time=time.time() - start_time,
+                        status='failed',
+                        error_message=str(e)
                     )
-                    
                     results.append(result)
-                    break  # Success, exit retry loop
-                    
-                except Exception as e:
-                    logger.error(f"Query attempt {attempt + 1} failed: {e}")
-                    if attempt == self.config.specific_config.query_retry_attempts - 1:
-                        # Final attempt failed
-                        result = ResearchResults(
-                            query=query.category or "unknown",
-                            search_results=[],
-                            processed_chunks=[],
-                            total_chunks_stored=0,
-                            total_sources=0,
-                            quality_stats={},
-                            execution_time=time.time() - start_time,
-                            status='failed',
-                            error_message=str(e)
-                        )
-                        results.append(result)
         
         return results
     
@@ -1046,7 +1212,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
 
 
 # Helper function to create a properly configured researcher component
-def create_researcher_component(
+async def create_researcher_component(
     component_name: str = "Research Agent",
     researcher_config: Optional[ResearcherConfig] = None
 ) -> ResearcherComponent:
@@ -1061,7 +1227,9 @@ def create_researcher_component(
         specific_config=researcher_config
     )
     
-    return ResearcherComponent(component_config)
+    rc = ResearcherComponent(component_config)
+    await rc.initialize()
+    return rc
 
 
 # Example usage and registration

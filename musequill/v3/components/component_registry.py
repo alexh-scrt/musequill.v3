@@ -17,7 +17,7 @@ from musequill.v3.components.generators.chapter_generator import ChapterGenerato
 from musequill.v3.components.discriminators.plot_coherence_critic import PlotCoherenceCritic, PlotCoherenceCriticConfig
 from musequill.v3.components.quality_control.comprehensive_quality_controller import ComprehensiveQualityController, QualityControllerConfig
 from musequill.v3.components.researcher.researcher_agent import ResearcherComponent, ResearcherConfig
-from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestrator, PipelineOrchestratorConfig, OrchestrationStrategy
+from musequill.v3.components.orchestration.pipeline_orchestrator import PipelineOrchestratorConfig, OrchestrationStrategy
 from musequill.v3.components.orchestration.enhanced_pipeline_orchestrator import EnhancedPipelineOrchestrator
 from musequill.v3.components.discriminators.literary_quality_critic import LiteraryQualityCritic
 from musequill.v3.components.discriminators.reader_engagement_critic import ReaderEngagementCritic
@@ -27,13 +27,7 @@ from musequill.v3.components.discriminators.llm_discriminator import LLMDiscrimi
 
 # Import LLM discriminator models for proper configuration
 from musequill.v3.models.llm_discriminator_models import (
-    CritiqueDimension, 
-    CritiqueConfidenceLevel,
-    SuggestionType,
-    ImprovementSuggestion,
-    DimensionAnalysis,
-    MarketViabilityAssessment,
-    ComprehensiveLLMCritique
+    CritiqueDimension
 )
 
 
@@ -65,7 +59,7 @@ def register_existing_components() -> bool:
         component_registry.register_component_type("quality_controller", ComprehensiveQualityController)
 
         # Market Intelligence engine
-        component_registry.register_component_type('market_intelligence_engine', MarketIntelligenceEngine)
+        component_registry.register_component_type('market_intelligence', MarketIntelligenceEngine)
         
         # Register Researcher
         component_registry.register_component_type("researcher", ResearcherComponent)

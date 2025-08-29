@@ -13,13 +13,15 @@ from typing import Dict, List, Any, Optional, Callable
 from dataclasses import dataclass
 from enum import Enum
 
+import chromadb
+
 from musequill.v3.components.base.component_interface import BaseComponent, ComponentConfiguration, ComponentType
 from musequill.v3.components.orchestration.pipeline_orchestrator import (
     PipelineOrchestrator, 
     PipelineOrchestratorConfig,
 )
 from musequill.v3.components.orchestration.enhanced_pipeline_config import EnhancedPipelineOrchestratorConfig
-
+from musequill.v3.components.base.component_interface import component_registry
 # Import the enhanced researcher
 from .pipeline_researcher import (
     PipelineResearcher, PipelineResearcherConfig, ResearchRequest, 
@@ -35,6 +37,13 @@ from musequill.v3.components.discriminators.llm_discriminator import (
 from musequill.v3.models.llm_discriminator_models import (
     ComprehensiveLLMCritique,
     CritiqueDimension
+)
+
+from musequill.v3.models.researcher_agent_model import (
+    ResearchQueryEx
+)
+from musequill.v3.components.market_intelligence.market_intelligence_engine import (
+    MarketIntelligenceEngineInput
 )
 
 logger = logging.getLogger(__name__)
@@ -194,7 +203,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
             'literary_quality_critic': self._literary_quality_critic,
             'reader_engagement_critic': self._reader_engagement_critic,
             'quality_controller': self._quality_controller,
-            'market_intelligence_engine': self._market_intelligence_engine,
+            'market_intelligence': self._market_intelligence_engine,
             'llm_discriminator': self._llm_discriminator
         }
 
@@ -248,7 +257,10 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
             if rule.condition(story_state):
                 try:
                     # Generate query from template
-                    query = self._generate_query_from_template(rule.query_template, story_state)
+                    if story_state['config'].get('research'):
+                        queries: List[ResearchQueryEx] = self._generate_queries_from_story(story_state['config']['research'])
+                    else:
+                        queries = self._generate_query_from_template(rule.query_template, story_state)
                     
                     # Create context
                     context = ResearchContext(
@@ -261,7 +273,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
                     
                     # Execute research
                     response = await self.researcher.research(
-                        query=query,
+                        queries=queries,
                         scope=rule.scope,
                         priority=rule.priority,
                         context=context
@@ -274,7 +286,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
                     self._store_research_in_story_state(rule.trigger, response, story_state)
                     
                     triggered_research.append(response)
-                    logger.info(f"Auto-triggered research: {rule.trigger.value} - {query}")
+                    logger.info(f"Auto-triggered research: {rule.trigger.value}")
                     
                 except Exception as e:
                     logger.error(f"Failed to execute auto-research for {rule.trigger.value}: {e}")
@@ -675,6 +687,123 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
     
     # STAGE IMPLEMENTATIONS WITH RESEARCH
     
+    def get_component(self, component_name: str) -> Optional[BaseComponent]:
+        """Retrieve a component by name."""
+        return self.components.get(component_name)
+
+    async def _extract_research_from_chroma(self, research_results: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """
+        Extract research data from Chroma storage based on the research results metadata.
+        
+        Args:
+            research_results: Results from researcher containing chroma_storage_info
+            
+        Returns:
+            Dict containing extracted research data organized by category
+        """
+        try:
+            # Get chroma storage info
+            chroma_info = research_results.get('chroma_storage_info', {})
+            if not chroma_info:
+                logger.warning("No chroma_storage_info found in research results")
+                return None
+                
+            research_id = chroma_info.get('research_id')
+            host = chroma_info.get('host', 'localhost')
+            port = chroma_info.get('port', 18000)
+            collection_name = chroma_info.get('collection_name', 'research_collection')
+            
+            if not research_id:
+                logger.warning("No research_id found in chroma_storage_info")
+                return None
+            
+            # Initialize Chroma client
+            chroma_client = chromadb.HttpClient(host=host, port=port)
+            chroma_collection = chroma_client.get_collection(name=collection_name)
+            
+            # Query all chunks for this research session
+            results = chroma_collection.get(
+                where={"research_id": research_id},
+                include=["metadatas", "documents"]
+            )
+            
+            if not results.get('metadatas'):
+                logger.info(f"No research data found in Chroma for research_id: {research_id}")
+                return None
+            
+            # Organize data by category
+            research_data = {}
+            category_content = {}
+            
+            for i, metadata in enumerate(results['metadatas']):
+                category = metadata.get('query_category', 'Unknown')
+                
+                if category not in category_content:
+                    category_content[category] = []
+                
+                # Get the document content
+                if i < len(results['documents']):
+                    document_content = results['documents'][i]
+                    
+                    # Only include substantial content
+                    if len(document_content.strip()) > 50:
+                        # Check for similarity to avoid duplicates
+                        is_duplicate = any(
+                            self._is_content_similar(document_content, existing_content.get('content', ''))
+                            for existing_content in category_content[category]
+                        )
+                        
+                        if not is_duplicate:
+                            category_content[category].append({
+                                'content': document_content.strip(),
+                                'source_url': metadata.get('source_url'),
+                                'source_title': metadata.get('source_title'),
+                                'source_domain': metadata.get('source_domain'),
+                                'tavily_score': metadata.get('tavily_score', 0.0),
+                                'query_priority': metadata.get('query_priority', 'Medium')
+                            })
+            
+            # Format for market intelligence component
+            research_data = {
+                'research_id': research_id,
+                'categories': category_content,
+                'total_categories': len(category_content),
+                'total_chunks': len(results['metadatas']),
+                'extraction_timestamp': datetime.now(timezone.utc).isoformat()
+            }
+            
+            logger.info(f"Extracted research data: {len(category_content)} categories, {len(results['metadatas'])} total chunks")
+            return research_data
+            
+        except Exception as e:
+            logger.error(f"Failed to extract research data from Chroma: {e}")
+            return None
+    
+    def _is_content_similar(self, text1: str, text2: str, threshold: float = 0.8) -> bool:
+        """
+        Check if two texts are similar based on their first 100 characters.
+        
+        Args:
+            text1: First text to compare
+            text2: Second text to compare  
+            threshold: Similarity threshold (0.0-1.0), default 0.8
+            
+        Returns:
+            True if texts are similar, False otherwise
+        """
+        if not text1 or not text2:
+            return False
+        
+        from difflib import SequenceMatcher
+        
+        # Compare first 100 characters
+        sample1 = text1[:100].strip().lower()
+        sample2 = text2[:100].strip().lower()
+        
+        # Use SequenceMatcher to calculate similarity ratio
+        similarity = SequenceMatcher(None, sample1, sample2).ratio()
+        return similarity >= threshold
+
     async def _market_analysis_with_research(self, story_state: Dict[str, Any]) -> Dict[str, Any]:
         """Market analysis stage with research integration."""
         config = story_state['config']
@@ -691,15 +820,22 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
             )
         )
         
+        # Extract actual research data from Chroma storage
+        research_data = None
+        if market_response.status == "completed" and market_response.results:
+            research_data = await self._extract_research_from_chroma(market_response.results)
+        
         # Execute market analysis component with research data
         market_component = self.get_component('market_intelligence')
         if market_component:
-            market_input = {
-                'genre': genre,
-                'research_data': market_response.results if market_response.status == "completed" else None,
+            market_input_dict = {
+                'target_genre': genre,
+                'research_results': research_data or {},
                 'analysis_depth': 'comprehensive'
             }
-            market_result = await market_component.execute(market_input)
+
+            market_input: MarketIntelligenceEngineInput = MarketIntelligenceEngineInput(**market_input_dict)
+            market_result = await market_component.process(market_input)
             story_state['market_intelligence'] = market_result
         
         return story_state
@@ -911,7 +1047,14 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         last_time = self.last_research_times[rule_key]
         hours_since = (datetime.now(timezone.utc) - last_time).total_seconds() / 3600
         return hours_since < cooldown_hours
-    
+
+    def _generate_queries_from_story(self, queries: List[Dict[str, Any]]) -> List[ResearchQueryEx]:
+        qs: List[ResearchQueryEx] = []
+        for q in queries:
+            query = ResearchQueryEx(**q['query'])
+            qs.append(query)
+        return qs
+
     def _generate_query_from_template(self, template: str, state: Dict[str, Any]) -> str:
         """Generate research query from template using story state."""
         return template.format(

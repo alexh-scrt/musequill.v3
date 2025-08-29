@@ -144,6 +144,11 @@ class EnhancedPipelineOrchestratorConfig(PipelineOrchestratorConfig):
         description="Maximum time to spend on LLM analysis"
     )
 
+    components: Dict[str, Dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Configuration for each component in the pipeline"
+    )
+
 # Updated function to create the enhanced config
 def resolve_environment_variables(config_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -277,7 +282,8 @@ def create_enhanced_pipeline_configuration_from_dict(config_dict: Dict[str, Any]
             enable_llm_discriminator=quality_settings.get('enable_llm_discriminator', True),
             llm_discriminator_weight=llm_discriminator_settings.get('weight', 0.6),
             llm_discriminator_model=llm_discriminator_settings.get('model', 'llama3.3:70b'),
-            llm_discriminator_temperature=llm_discriminator_settings.get('temperature', 0.2)
+            llm_discriminator_temperature=llm_discriminator_settings.get('temperature', 0.2),
+            components=components_settings
         )
         
         return config

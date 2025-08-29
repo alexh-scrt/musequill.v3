@@ -71,12 +71,106 @@ class ResearchResults:
     status: str
     error_message: Optional[str] = None
 
+class ResearchQueryEx(BaseModel):
+    query_type: QueryStatus = QueryStatus.default()
+    context: Optional[str] = None
+    topic: Optional[str] = None
+    question: Optional[str] = None
+    sources_suggested: Optional[List[str]] = None
+    category: Optional[str] = None
+    priority: Optional[int] = Field(default=1, description='Research Priority')
+
+    def get_query(self) -> str:
+        """Get the query string for Tavily."""
+        def build_query(include_sources=True, include_category=True, include_context=True, include_topic=True, question=None):
+            parts = []
+            if include_context and self.context:
+                parts.append(f"**CONTEXT**:[{self.context}].")
+            if include_sources and self.sources_suggested:
+                parts.append(f"**SOURCES**: [{', '.join(self.sources_suggested)}].")
+            if include_category and self.category:
+                parts.append(f"**CATEGORY**: [{self.category}].")
+            if include_topic and self.topic:
+                parts.append(f"**TOPIC**: [{self.topic}].")
+            if question or self.question:
+                parts.append(f"**WHAT TO RESEARCH**: [{question or self.question}]")
+            return "\n".join(parts)
+
+        # Try full query first
+        query_str = build_query()
+        if len(query_str) <= 400:
+            return query_str
+
+        # Drop SOURCES first
+        query_str = build_query(include_sources=False)
+        if len(query_str) <= 400:
+            return query_str
+
+        # Drop CATEGORY next
+        query_str = build_query(include_sources=False, include_category=False)
+        if len(query_str) <= 400:
+            return query_str
+
+        # Drop CONTEXT next
+        query_str = build_query(include_sources=False, include_category=False, include_context=False)
+        if len(query_str) <= 400:
+            return query_str
+
+        # Drop TOPIC next
+        query_str = build_query(include_sources=False, include_category=False, include_context=False, include_topic=False)
+        if len(query_str) <= 400:
+            return query_str
+
+        # Last resort: shorten the question semantically
+        if self.question and len(self.question) > 350:  # Leave room for formatting
+            # Try to keep the core meaning by taking first part up to last complete sentence/clause
+            shortened = self.question[:350]
+            # Find the last period, question mark, or exclamation mark
+            last_punct = max(shortened.rfind('.'), shortened.rfind('?'), shortened.rfind('!'))
+            if last_punct > 100:  # Only truncate at sentence boundary if it's not too short
+                shortened = shortened[:last_punct + 1]
+            else:
+                # Otherwise, truncate at word boundary
+                last_space = shortened.rfind(' ')
+                if last_space > 50:
+                    shortened = shortened[:last_space] + "..."
+                else:
+                    shortened = shortened + "..."
+            
+            query_str = build_query(include_sources=False, include_category=False, 
+                                  include_context=False, include_topic=False, question=shortened)
+        
+        return query_str
+
+    def to_dict(self, include_none: bool = False) -> dict:
+        """Convert ResearchQueryEx instance to dictionary"""
+        result = {}
+        for field_name, field_value in [
+            ('query_type', self.query_type.value if isinstance(self.query_type, QueryStatus) else self.query_type),
+            ('context', self.context),
+            ('topic', self.topic),
+            ('question', self.question),
+            ('sources_suggested', self.sources_suggested),
+            ('category', self.category)
+        ]:
+            if field_value is not None or include_none:
+                result[field_name] = field_value
+        return result
+    
+    def to_json(self, include_none: bool = False) -> str:
+        """Convert ResearchQueryEx instance to JSON string"""
+        return json.dumps(self.to_dict(include_none=include_none), indent=2)
+
+    def __str__(self) -> str:
+        """String representation of ResearchQueryEx"""
+        return self.to_json(include_none=True)
 
 class ResearchQuery(BaseModel):
     query_type: QueryStatus = QueryStatus.default()
     category: Optional[str] = None
     topic: Optional[str] = None
     description: Optional[str] = None
+    queries: List[str] = []
     priority: Optional[str] = None
     estimated_time: Optional[Union[str, int]] = None
     research_methods: Optional[List[str]] = None
@@ -103,7 +197,7 @@ class ResearchQuery(BaseModel):
 **SOURCES**: [{", ".join(self.sources_suggested)}].
 **CATEGORY**: [{self.category}].
 **TOPIC**: [{self.topic}].
-**WHAT TO RESEARCH**: [{self.description}]
+**WHAT TO RESEARCH**: [{';'.join(self.queries)}]
 """
 
     def get_questions(self) -> Optional[List[str]]:
@@ -140,7 +234,7 @@ f"""
         """Convert ResearchQuery instance to dictionary"""
         result = {}
         for field_name, field_value in [
-            ('query_type', self.query_type),
+            ('query_type', self.query_type.value if isinstance(self.query_type, QueryStatus) else self.query_type),
             ('category', self.category),
             ('topic', self.topic),
             ('description', self.description),
@@ -184,63 +278,3 @@ f"""
             raise KeyError("Expected 'research_topics' key in JSON data or direct list of topics")
         
         return [ResearchQuery.from_dict(topic) for topic in topics_list]
-
-
-# Example usage:
-if __name__ == "__main__":
-    # Your complete JSON data
-    complete_json = '''
-    {
-        "category": "World-Building",
-        "topic": "Mythical Creatures in Slavic Folklore",
-        "description": "Research various mythical creatures from Slavic folklore to incorporate into the story, ensuring cultural accuracy and sensitivity.",
-        "priority": "High",
-        "estimated_time": 10,
-        "research_methods": [
-            "Literature review",
-            "Online research"
-        ],
-        "key_questions": [
-            "What are the most common mythical creatures in Slavic folklore?",
-            "How are these creatures typically depicted and what are their characteristics?",
-            "How can these creatures be adapted into the story to enhance world-building?"
-        ],
-        "sources_suggested": [
-            "Folklore texts",
-            "Academic articles",
-            "Online encyclopedias"
-        ]
-    }
-    '''
-    
-    # Partial JSON data (missing some fields)
-    partial_json = '''
-    {
-        "category": "World-Building",
-        "topic": "Dragon Mythology",
-        "priority": "Medium"
-    }
-    '''
-    
-    # Create ResearchQuery from complete JSON
-    query1 = ResearchQuery.from_json(complete_json)
-    print("Complete query:")
-    print(f"Topic: {query1.topic}")
-    print(f"Priority: {query1.priority}")
-    print(f"Estimated time: {query1.estimated_time}")
-    
-    # Create ResearchQuery from partial JSON
-    query2 = ResearchQuery.from_json(partial_json)
-    print("\nPartial query:")
-    print(f"Topic: {query2.topic}")
-    print(f"Priority: {query2.priority}")
-    print(f"Description: {query2.description}")  # Will be None
-    print(f"Research methods: {query2.research_methods}")  # Will be None
-    
-    # Convert back to JSON (excluding None values)
-    print("\nPartial query back to JSON (no None values):")
-    print(query2.to_json())
-    
-    # Convert back to JSON (including None values)
-    print("\nPartial query back to JSON (with None values):")
-    print(query2.to_json(include_none=True))

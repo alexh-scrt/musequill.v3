@@ -22,8 +22,8 @@ from tavily import TavilyClient
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError
 )
-from musequill.v3.components.researcher.researcher_agent import ResearcherComponent
-from musequill.v3.models.researcher_agent_model import ResearchQuery, ResearchResults
+from musequill.v3.components.researcher.researcher_agent import ResearcherComponent, ResearcherInput, ResearcherOutput
+from musequill.v3.models.researcher_agent_model import ResearchQuery, ResearchResults, ResearchQueryEx
 
 logger = logging.getLogger(__name__)
 
@@ -60,7 +60,7 @@ class ResearchContext:
 class ResearchRequest:
     """A request for research to be performed."""
     request_id: str = field(default_factory=lambda: str(uuid4()))
-    query: str = ""
+    queries: List[ResearchQueryEx] = field(default_factory=list)
     scope: ResearchScope = ResearchScope.STANDARD
     priority: ResearchPriority = ResearchPriority.NORMAL
     context: Optional[ResearchContext] = None
@@ -125,7 +125,7 @@ class PipelineResearcher:
         """Initialize the researcher component and start processing."""
         # Initialize the core researcher component
         from musequill.v3.components.researcher.researcher_agent import create_researcher_component
-        self.researcher_component = create_researcher_component("Pipeline Researcher")
+        self.researcher_component = await create_researcher_component("Pipeline Researcher")
         self.running = True
         
         # Start the request processing loop
@@ -144,7 +144,7 @@ class PipelineResearcher:
     
     async def research(
         self,
-        query: str,
+        queries: List[ResearchQueryEx],
         scope: ResearchScope = ResearchScope.STANDARD,
         priority: ResearchPriority = ResearchPriority.NORMAL,
         context: Optional[ResearchContext] = None,
@@ -164,7 +164,7 @@ class PipelineResearcher:
             ResearchResponse with results and metadata
         """
         request = ResearchRequest(
-            query=query,
+            queries=queries,
             scope=scope,
             priority=priority,
             context=context,
@@ -179,7 +179,7 @@ class PipelineResearcher:
     async def quick_search(self, query: str, max_sources: int = 5) -> ResearchResponse:
         """Perform a quick search for immediate results."""
         return await self.research(
-            query=query,
+            queries=[ResearchQueryEx(**{'question':query})],
             scope=ResearchScope.QUICK,
             priority=ResearchPriority.HIGH,
             max_sources=max_sources,
@@ -194,7 +194,7 @@ class PipelineResearcher:
     ) -> ResearchResponse:
         """Perform comprehensive research on a topic."""
         return await self.research(
-            query=topic,
+            queries=[ResearchQueryEx(**{'question':topic})],
             scope=ResearchScope.DEEP,
             priority=ResearchPriority.NORMAL,
             context=context,
@@ -218,15 +218,26 @@ class PipelineResearcher:
             f"What {genre} books are currently successful and why?",
             f"What trends are emerging in {genre} publishing?"
         ]
-        
+        queries: List[ResearchQueryEx] = []
+        for q in market_questions:
+            queries.append(ResearchQueryEx(
+                **{
+                    "context": "Commercial positioning for genre success",
+                    "topic": "book market research",
+                    "question": q,
+                    "sources_suggested": ["NPD BookScan", "Amazon Kindle bestsellers", "Goodreads trends", "Tor Books market analysis", "Locus Online"],
+                    "category": "book market"
+                }
+            ))    
+
         return await self.research(
-            query=query,
+            queries=queries,
             scope=ResearchScope.TARGETED,
             priority=ResearchPriority.HIGH,
             context=context,
             specific_questions=market_questions,
             filters={"time_range": "recent", "source_types": ["publishing", "reviews", "industry"]},
-            max_sources=15
+            max_sources=5
         )
     
     async def plot_research(
@@ -250,9 +261,20 @@ class PipelineResearcher:
             f"What techniques create engaging {plot_element}?",
             f"How does {plot_element} affect reader engagement?"
         ]
+        queries: List[ResearchQueryEx] = []
+        for q in plot_questions:
+            queries.append(ResearchQueryEx(
+                **{
+                    "context": "Commercial positioning for genre success",
+                    "topic": "book market research",
+                    "question": q,
+                    "sources_suggested": ["NPD BookScan", "Amazon Kindle bestsellers", "Goodreads trends", "Tor Books market analysis", "Locus Online"],
+                    "category": "book market"
+                }
+            ))    
         
         return await self.research(
-            query=query,
+            queries=queries,
             scope=ResearchScope.TARGETED,
             context=context,
             specific_questions=plot_questions,
@@ -275,9 +297,12 @@ class PipelineResearcher:
         self.request_queue.append(request)
         self.request_queue.sort(key=lambda r: self._get_priority_weight(r.priority))
         
-        logger.info(f"Submitted research request {request.request_id}: {request.query}")
+        logger.info(f"Submitted research request {request.request_id}:" 
+                    f"{'\n\t'.join([q.to_json() for q in request.queries])}"
+        )
         
         # Wait for completion
+        logger.info(f"⏰  Waiting for research request {request.request_id} to ...")
         return await self._wait_for_completion(request.request_id)
     
     async def cancel_request(self, request_id: str) -> bool:
@@ -369,16 +394,21 @@ class PipelineResearcher:
         
         try:
             # Convert request to ResearchQuery format
-            research_query = self._convert_to_research_query(request)
-            
+            # research_query = self._convert_to_research_query(request)
+            queries = [q for q in request.queries]
+            if request.specific_questions:
+                for q in request.specific_questions:
+                    queries.append(ResearchQueryEx(question=q))
             # Execute using the core researcher component
-            researcher_input = {
+            researcher_input_dic = {
                 'research_id': request.request_id,
-                'queries': [research_query],
+                'queries': queries,
                 'force_refresh': True
             }
             
-            result = await self.researcher_component.execute(researcher_input)
+            researcher_input = ResearcherInput(**researcher_input_dic)
+
+            result = await self.researcher_component.process(researcher_input)
             
             # Convert result to ResearchResponse
             response = self._convert_to_response(request, result, start_time)
@@ -413,7 +443,7 @@ class PipelineResearcher:
         """Convert ResearchRequest to ResearchQuery format."""
         return ResearchQuery(
             category=request.context.component_name if request.context else "general",
-            questions=request.specific_questions or [request.query],
+            queries=request.specific_questions or [request.query],
             priority="High" if request.priority in [ResearchPriority.URGENT, ResearchPriority.HIGH] else "Medium"
         )
     
@@ -464,8 +494,11 @@ class PipelineResearcher:
     
     def _generate_cache_key(self, request: ResearchRequest) -> str:
         """Generate a cache key for a research request."""
+        # Convert ResearchQueryEx objects to serializable dictionaries
+        serializable_queries = [query.to_dict(include_none=True) for query in request.queries]
+        
         key_data = {
-            'query': request.query,
+            'query': serializable_queries,
             'scope': request.scope.value,
             'specific_questions': request.specific_questions,
             'filters': request.filters
@@ -503,14 +536,16 @@ class PipelineResearcher:
     
     async def _wait_for_completion(self, request_id: str) -> ResearchResponse:
         """Wait for a request to complete and return the result."""
-        timeout_seconds = self.active_requests[request_id].timeout_seconds
+        request = self.active_requests[request_id]
+        cache_key = self._generate_cache_key(request)
+        timeout_seconds = request.timeout_seconds
         start_time = datetime.now(timezone.utc)
         
         while (datetime.now(timezone.utc) - start_time).total_seconds() < timeout_seconds:
-            if request_id not in self.active_requests:
-                # Request completed, find the result
-                # This is simplified - in a real implementation, you'd store results
-                break
+            # Check if result is available in cache
+            if cache_key in self.results_cache:
+                result, _ = self.results_cache[cache_key]
+                return result
             await asyncio.sleep(0.5)
         
         # Timeout case

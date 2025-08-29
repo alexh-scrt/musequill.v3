@@ -145,6 +145,10 @@ class MarketIntelligenceEngineInput(BaseModel):
     """Input data for Market Intelligence Engine."""
     
     target_genre: str = Field(description="Genre to analyze")
+    research_results: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Existing research results to use"
+    )
     specific_focus_areas: List[str] = Field(
         default_factory=list,
         description="Specific areas to focus analysis on"

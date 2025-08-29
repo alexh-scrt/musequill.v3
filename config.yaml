@@ -67,6 +67,62 @@ components:
     pipeline_timeout_minutes: "${PIPELINE_TIMEOUT:60}"
     enable_comprehensive_logging: "${ENABLE_LOGGING:true}"
     fallback_on_component_failure: "${ENABLE_FALLBACK:true}"
+  generators:
+    chapter_writer:
+      weight: "${CHAPTER_WRITER_WEIGHT:0.5}"
+      model: "${CHAPTER_WRITER_MODEL:llama3.3:70b}"
+      temperature: "${CHAPTER_WRITER_TEMPERATURE:0.2}"
+      max_time: "${CHAPTER_WRITER_MAX_TIME:90}"
+      top_p: "${CHAPTER_WRITER_TOP_P:0.95}"
+      max_retries: "${CHAPTER_WRITER_MAX_RETRIES:3}"
+      enable_caching: "${CHAPTER_WRITER_ENABLE_CACHING:true}"
+      cache_ttl_hours: "${CHAPTER_WRITER_CACHE_TTL:12}"
+      request_timeout_seconds: "${CHAPTER_WRITER_TIMEOUT:30}"
+      enable_llm_discriminator: "${ENABLE_LLM_DISCRIMINATOR:true}"
+  discriminators:
+    literary_quality_critic:
+      - pass
+    plot_coherence_critic:
+      - pass
+    reader_engagement_critic:
+      - pass
+    llm_discriminator:
+      enable_llm_discriminator: "${ENABLE_LLM_DISCRIMINATOR:true}"
+      weight: "${LLM_DISCRIMINATOR_WEIGHT:0.6}"
+      model: "${LLM_MODEL:llama3.3:70b}"
+      temperature: "${LLM_TEMPERATURE:0.2}"
+      depth: "comprehensive"
+      strictness: 0.75,
+      include_suggestions: true,
+      max_time: 90
+  market_intelligence:
+    tavily_api_key: "${TAVILY_API_KEY}"
+  quality_control:
+    comprehensive:
+      weight: "${COMPREHENSIVE_WEIGHT:0.5}"
+      model: "${COMPREHENSIVE_MODEL:llama3.3:70b}"
+      temperature: "${COMPREHENSIVE_TEMPERATURE:0.2}"
+      max_time: "${COMPREHENSIVE_MAX_TIME:90}"
+      top_p: "${COMPREHENSIVE_TOP_P:0.95}"
+      max_retries: "${COMPREHENSIVE_MAX_RETRIES:3}"
+      enable_caching: "${COMPREHENSIVE_ENABLE_CACHING:true}"
+      cache_ttl_hours: "${COMPREHENSIVE_CACHE_TTL:12}"
+      request_timeout_seconds: "${COMPREHENSIVE_TIMEOUT:30}"
+      enable_llm_discriminator: "${ENABLE_LLM_DISCRIMINATOR:true}"
+  research:
+    enable_research_integration: true
+    market_refresh_interval_hours: 24
+    plot_inconsistency_threshold: 0.7
+    character_development_gaps: true
+    researcher:
+      # Environment variable with no default - will warn if not set
+      tavily_api_key: "${TAVILY_API_KEY}"
+      # Environment variable with default value
+      max_concurrent_requests: "${RESEARCHER_MAX_CONCURRENT:3}"
+      enable_caching: "${RESEARCHER_ENABLE_CACHING:true}"
+      cache_ttl_hours: "${RESEARCHER_CACHE_TTL:12}"
+      request_timeout_seconds: "${RESEARCHER_TIMEOUT:30}"
+      max_results_per_query: "${RESEARCHER_MAX_RESULTS:10}"
 
 # External services
 external_services:

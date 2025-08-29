@@ -75,5 +75,96 @@
     "literary_quality_minimum": 0.75,
     "reader_engagement_minimum": 0.8,
     "originality_target": 0.85
-  }
+  },
+
+  "research": [
+    {
+      "query": {
+        "context": "Scientific foundation for consciousness transfer technology",
+        "topic": "neuroscience breakthroughs",
+        "question": "What are the most recent advances in neural interfaces, brain-computer interfaces, and memory/consciousness mapping that could plausibly support digital consciousness transfer by 2035?",
+        "sources_suggested": [
+          "Nature Neuroscience",
+          "ScienceDirect",
+          "MIT Technology Review",
+          "NIH",
+          "arXiv (neuroscience/AI)"
+        ],
+        "category": "science"
+      }
+    },
+    {
+      "query": {
+        "context": "Philosophical implications of identity and mind uploading",
+        "topic": "consciousness philosophy",
+        "question": "What do leading philosophers and cognitive scientists argue about whether consciousness can exist outside biological substrates, and how does this affect debates about identity, personhood, and the 'self'?",
+        "sources_suggested": [
+          "Stanford Encyclopedia of Philosophy",
+          "PhilPapers",
+          "Oxford University Press",
+          "Aeon Essays"
+        ],
+        "category": "philosophy"
+      }
+    },
+    {
+      "query": {
+        "context": "Corporate dynamics shaping technology ownership and ethics",
+        "topic": "tech industry power dynamics",
+        "question": "What real-world examples exist of technology companies leveraging or abusing power to control breakthrough technologies, and how do corporate interests conflict with individual rights and public good?",
+        "sources_suggested": [
+          "Harvard Business Review",
+          "Wired",
+          "The Verge",
+          "TechCrunch",
+          "Financial Times"
+        ],
+        "category": "business"
+      }
+    },
+    {
+      "query": {
+        "context": "Literary and genre positioning for readership appeal",
+        "topic": "cyberpunk reader preferences",
+        "question": "What narrative elements, tropes, and stylistic choices do contemporary cyberpunk readers respond most strongly to, and how do they compare with classic cyberpunk expectations?",
+        "sources_suggested": [
+          "Goodreads (cyberpunk reviews)",
+          "Tor.com",
+          "Strange Horizons",
+          "Clarkesworld Magazine",
+          "Reddit r/cyberpunk"
+        ],
+        "category": "literature"
+      }
+    },
+    {
+      "query": {
+        "context": "Market viability and originality within the sci-fi space",
+        "topic": "emerging sci-fi trends",
+        "question": "What current and upcoming trends in science fiction publishing are shaping demand, particularly around near-future neuroscience, AI ethics, and cyberpunk themes?",
+        "sources_suggested": [
+          "Publishers Weekly",
+          "Locus Magazine",
+          "SFWA (Science Fiction & Fantasy Writers Association)",
+          "Amazon Sci-Fi charts"
+        ],
+        "category": "literature"
+      }
+    },
+    {
+      "query": {
+        "context": "Commercial positioning for genre success",
+        "topic": "book market research",
+        "question": "How popular is the cyberpunk and near-future neuroscience sci-fi subgenre in the current book market, what are recent sales trends, and which comparable works are performing strongly?",
+        "sources_suggested": [
+          "NPD BookScan",
+          "Amazon Kindle bestsellers",
+          "Goodreads trends",
+          "Tor Books market analysis",
+          "Locus Online"
+        ],
+        "category": "market"
+      }
+    }
+  ]
 }
