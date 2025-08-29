@@ -108,6 +108,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         
         # Setup default research rules
         self._setup_default_research_rules()
+        self.components  = {}
     
     async def initialize(self):
         """Initialize the orchestrator and researcher."""
@@ -115,13 +116,15 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         await self.researcher.initialize()
         
         # Initialize LLM Discriminator
-        if self.config.specific_config.enable_llm_discriminator:
-            await self._initialize_llm_discriminator()
+        # if self.config.specific_config.enable_llm_discriminator:
+        #     await self._initialize_llm_discriminator()
         
         # Inject researcher into components
         self._inject_researcher_into_components()
         
         logger.info("Enhanced pipeline orchestrator with research capabilities initialized")
+
+        return True
     
     async def _initialize_llm_discriminator(self):
         """Initialize the LLM discriminator component."""
@@ -184,11 +187,22 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
     
     def _inject_researcher_into_components(self):
         """Inject researcher instance into components that support it."""
+        # Build components dictionary from individual component references        
+        self.components  = {
+            'chapter_generator': self._chapter_generator,
+            'plot_coherence_critic': self._plot_coherence_critic,
+            'literary_quality_critic': self._literary_quality_critic,
+            'reader_engagement_critic': self._reader_engagement_critic,
+            'quality_controller': self._quality_controller,
+            'market_intelligence_engine': self._market_intelligence_engine,
+            'llm_discriminator': self._llm_discriminator
+        }
+
         for component_name, component in self.components.items():
-            if isinstance(component, ResearchableMixin):
+            if component and isinstance(component, ResearchableMixin):
                 component.set_researcher(self.researcher)
                 logger.info(f"Injected researcher into component: {component_name}")
-    
+
     def add_research_rule(self, rule: ResearchRule):
         """Add a custom research rule."""
         self.research_rules.append(rule)

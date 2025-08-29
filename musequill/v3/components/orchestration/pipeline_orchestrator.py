@@ -246,6 +246,8 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         # Health monitoring
         self._last_health_check: datetime = datetime.now()
         self._component_health_status: Dict[str, bool] = {}
+
+        self.components: Dict[str, Any] = {}
     
     async def initialize(self) -> bool:
         """Initialize pipeline orchestrator and all managed components."""
@@ -503,7 +505,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 self._market_intelligence_engine = component_registry.get_component(mi_id)
                 await self._market_intelligence_engine.start()
 
-            if 'llm_discriminator' in component_config:
+            if 'llm_discriminator' in component_configs:
                 llm_config = self._create_llm_discriminator_config()
                 component_config = ComponentConfiguration(
                     component_type=ComponentType.DISCRIMINATOR,
@@ -549,6 +551,11 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
             'reader_engagement_critic': ComponentConfiguration(
                 component_type=ComponentType.DISCRIMINATOR,
                 component_name="Reader Engagement Critic",
+                specific_config={}
+            ),
+            'llm_discriminator': ComponentConfiguration(
+                component_type=ComponentType.DISCRIMINATOR,
+                component_name="LLM Critic",
                 specific_config={}
             ),
             'quality_controller': ComponentConfiguration(
