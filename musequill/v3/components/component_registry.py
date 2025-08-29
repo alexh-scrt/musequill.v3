@@ -30,6 +30,16 @@ from musequill.v3.models.llm_discriminator_models import (
     CritiqueDimension
 )
 
+from musequill.v3.components.character_developer.character_development_config import (
+    create_character_development_config_from_dict,
+    CharacterDevelopmentConfig,
+    CharacterDevelopmentStrategy,
+    VoiceConsistencyLevel
+)
+
+from musequill.v3.components.character_developer.character_developer import (
+    CharacterDevelopmentComponent
+)
 
 def register_llm_discriminator_component() -> bool:
     """Register the LLM Discriminator component specifically."""
@@ -64,6 +74,9 @@ def register_existing_components() -> bool:
         # Register Researcher
         component_registry.register_component_type("researcher", ResearcherComponent)
         
+        # Register Character Developer
+        component_registry.register_component_type("character_developer", CharacterDevelopmentComponent)
+
         # Register Orchestrator
         component_registry.register_component_type("pipeline_orchestrator", EnhancedPipelineOrchestrator)
         
@@ -198,7 +211,17 @@ def create_enhanced_component_configurations() -> Dict[str, ComponentConfigurati
     
     # Create LLM discriminator config
     llm_discriminator_config = create_comprehensive_llm_discriminator_config()
-    
+    character_dev_config = create_character_development_config_from_dict({
+        "strategy": CharacterDevelopmentStrategy.FAST_PROTOTYPING,
+        "voice_consistency": VoiceConsistencyLevel.HIGH,
+        "max_characters": 5,
+        "max_chapters": 10,
+        "max_concurrent_executions": 2,
+        "execution_timeout_seconds": 300,
+        "auto_recycle_after_uses": 50,
+        "recycle_on_error_count": 3
+    })
+
     return {
         "chapter_generator": ComponentConfiguration(
             component_type=ComponentType.GENERATOR,
@@ -255,6 +278,18 @@ def create_enhanced_component_configurations() -> Dict[str, ComponentConfigurati
             specific_config=researcher_config
         ),
         
+        "character_developer": ComponentConfiguration(
+            component_type=ComponentType.GENERATOR,  # Character development is a generative process
+            component_name="Character Development Component",
+            version="1.0.0",
+            max_concurrent_executions=1,  # Character development should be sequential
+            execution_timeout_seconds=character_dev_config.max_processing_time_seconds,
+            auto_recycle_after_uses=100,
+            recycle_on_error_count=3,
+            specific_config=character_dev_config
+        ),
+
+
         "pipeline_orchestrator": ComponentConfiguration(
             component_type=ComponentType.ORCHESTRATOR,
             component_name="Pipeline Orchestrator",

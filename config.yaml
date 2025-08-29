@@ -123,6 +123,62 @@ components:
       cache_ttl_hours: "${RESEARCHER_CACHE_TTL:12}"
       request_timeout_seconds: "${RESEARCHER_TIMEOUT:30}"
       max_results_per_query: "${RESEARCHER_MAX_RESULTS:10}"
+    # Character Development Component Configuration
+  character_developer:
+    # Core Development Strategy
+    development_strategy: "${CHARACTER_DEV_STRATEGY:gradual_arc}"  # gradual_arc, crisis_driven, relationship_focused, internal_journey, plot_responsive, market_optimized
+    voice_consistency_level: "${CHARACTER_VOICE_CONSISTENCY:flexible}"  # strict, flexible, adaptive
+    
+    # Development Limits and Thresholds
+    max_characters_per_chapter: "${MAX_CHARS_PER_CHAPTER:5}"
+    staleness_threshold: "${CHARACTER_STALENESS_THRESHOLD:5}"  # chapters without development before considered stale
+    min_development_chapters: "${MIN_DEV_CHAPTERS:3}"  # minimum chapters between major developments
+    max_growth_per_chapter: "${MAX_GROWTH_PER_CHAPTER:3}"  # maximum growth milestones per chapter per character
+    
+    # Feature Toggles
+    enable_growth_milestones: "${ENABLE_GROWTH_MILESTONES:true}"
+    enable_obstacle_resolution: "${ENABLE_OBSTACLE_RESOLUTION:true}"
+    enable_relationship_dynamics: "${ENABLE_RELATIONSHIP_DYNAMICS:true}"
+    voice_pattern_analysis: "${ENABLE_VOICE_ANALYSIS:true}"
+    preserve_core_traits: "${PRESERVE_CORE_TRAITS:true}"
+    
+    # Market Intelligence Integration
+    use_market_intelligence: "${USE_MARKET_INTELLIGENCE:true}"
+    market_preference_weight: "${MARKET_PREFERENCE_WEIGHT:0.3}"  # 0.0-1.0 weight for market preferences in development
+    
+    # Research Integration
+    enable_research_integration: "${ENABLE_CHARACTER_RESEARCH:true}"
+    research_query_templates:
+      character_archetypes: "${CHARACTER_ARCHETYPES_TEMPLATE:{genre} character archetypes reader preferences}"
+      development_patterns: "${DEV_PATTERNS_TEMPLATE:{genre} character development successful patterns}"
+      voice_techniques: "${VOICE_TECHNIQUES_TEMPLATE:{genre} character voice dialogue techniques}"
+      relationship_dynamics: "${RELATIONSHIP_DYNAMICS_TEMPLATE:{genre} character relationships compelling dynamics}"
+    
+    # Voice and Dialogue Analysis
+    dialogue_consistency_weight: "${DIALOGUE_CONSISTENCY_WEIGHT:0.7}"  # 0.0-1.0
+    enable_voice_validation: "${ENABLE_VOICE_VALIDATION:true}"
+    enable_arc_validation: "${ENABLE_ARC_VALIDATION:true}"
+    
+    # Quality Control
+    development_quality_threshold: "${DEV_QUALITY_THRESHOLD:0.7}"  # 0.0-1.0
+    
+    # Performance Settings
+    max_processing_time_seconds: "${CHARACTER_DEV_MAX_TIME:60}"
+    enable_parallel_processing: "${ENABLE_PARALLEL_CHARACTER_PROCESSING:true}"
+    
+    # Output Control
+    include_development_rationale: "${INCLUDE_DEV_RATIONALE:true}"
+    development_detail_level: "${DEV_DETAIL_LEVEL:comprehensive}"  # basic, standard, comprehensive
+    
+    # Advanced Features (Optional)
+    enable_predictive_development: "${ENABLE_PREDICTIVE_DEV:false}"  # experimental feature
+    enable_cross_character_analysis: "${ENABLE_CROSS_CHARACTER_ANALYSIS:true}"
+    
+    # Adaptive Development Weights
+    adaptive_development_weights:
+      plot_driven: "${PLOT_DRIVEN_WEIGHT:0.4}"
+      character_driven: "${CHARACTER_DRIVEN_WEIGHT:0.4}"
+      market_driven: "${MARKET_DRIVEN_WEIGHT:0.2}"
 
 # External services
 external_services:

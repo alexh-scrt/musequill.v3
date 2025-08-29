@@ -231,6 +231,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         self._quality_controller = None
         self._market_intelligence_engine = None
         self._llm_discriminator = None
+        self._character_developer = None
 
         # Pipeline state
         self.pipeline_state = PipelineState.IDLE
@@ -511,6 +512,15 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 self._market_intelligence_engine = component_registry.get_component(mi_id)
                 await self._market_intelligence_engine.initialize()
                 await self._market_intelligence_engine.start()
+
+            if 'character_developer' in component_configs:
+                developer_id = component_registry.create_component(
+                    'character_developer',
+                    component_configs['character_developer']
+                )
+                self._character_developer = component_registry.get_component(developer_id)
+                await self._character_developer.initialize()
+                await self._character_developer.start()
 
             if 'llm_discriminator' in component_configs:
                 llm_config = self._create_llm_discriminator_config()
@@ -1208,3 +1218,4 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
             self.pipeline_state = PipelineState.IDLE
             return True
         return False
+    

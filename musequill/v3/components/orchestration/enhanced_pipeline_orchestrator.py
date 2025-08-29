@@ -868,11 +868,11 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         return story_state
     
     async def _character_development_with_research(self, story_state: Dict[str, Any]) -> Dict[str, Any]:
-        """Character development stage with research integration."""
+        # This method already exists in enhanced_pipeline_orchestrator.py
         config = story_state['config']
         genre = config.get('genre', 'general')
         
-        # Research character development techniques
+        # Research character development techniques (already implemented)
         character_research = await self.researcher.deep_research(
             topic=f"{genre} character development techniques",
             specific_questions=[
@@ -891,14 +891,24 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         # Execute character development component
         character_component = self.get_component('character_developer')
         if character_component:
-            character_input = {
-                'plot_outline': story_state.get('plot_outline', {}),
-                'genre': genre,
-                'research_insights': character_research.results if character_research.status == "completed" else None,
-                'market_preferences': story_state.get('market_intelligence', {})
-            }
-            character_result = await character_component.execute(character_input)
-            story_state['characters'] = character_result
+            from musequill.v3.components.character_developer.character_development_models import CharacterDevelopmentInput
+            
+            character_input = CharacterDevelopmentInput(
+                characters=story_state.get('characters', {}),
+                current_chapter=story_state.get('current_chapter', 1),
+                plot_outline=story_state.get('plot_outline', {}),
+                genre=genre,
+                market_preferences=story_state.get('market_intelligence', {}).get('reader_preferences'),
+                success_patterns=story_state.get('market_intelligence', {}).get('success_patterns'),
+                research_insights=character_research.results if character_research.status == "completed" else None,
+                chapter_objectives=story_state.get('chapter_objectives', []),
+                constraints=story_state.get('constraints', {}),
+                force_development=story_state.get('force_character_development', [])
+            )
+            
+            character_result = await character_component.invoke(character_input)
+            story_state['characters'] = character_result.updated_characters
+            story_state['character_development_result'] = character_result
         
         return story_state
     
