@@ -31,10 +31,10 @@ from musequill.v3.models.llm_discriminator_models import (
 )
 
 from musequill.v3.components.character_developer.character_development_config import (
-    create_character_development_config_from_dict,
     CharacterDevelopmentConfig,
     CharacterDevelopmentStrategy,
-    VoiceConsistencyLevel
+    VoiceConsistencyLevel,
+    create_character_development_config_from_dict
 )
 
 from musequill.v3.components.character_developer.character_developer import (
@@ -212,8 +212,8 @@ def create_enhanced_component_configurations() -> Dict[str, ComponentConfigurati
     # Create LLM discriminator config
     llm_discriminator_config = create_comprehensive_llm_discriminator_config()
     character_dev_config = create_character_development_config_from_dict({
-        "strategy": CharacterDevelopmentStrategy.FAST_PROTOTYPING,
-        "voice_consistency": VoiceConsistencyLevel.HIGH,
+        "strategy": CharacterDevelopmentStrategy.GRADUAL_ARC,
+        "voice_consistency": VoiceConsistencyLevel.ADAPTIVE,
         "max_characters": 5,
         "max_chapters": 10,
         "max_concurrent_executions": 2,
@@ -277,7 +277,7 @@ def create_enhanced_component_configurations() -> Dict[str, ComponentConfigurati
             recycle_on_error_count=5,
             specific_config=researcher_config
         ),
-        
+
         "character_developer": ComponentConfiguration(
             component_type=ComponentType.GENERATOR,  # Character development is a generative process
             component_name="Character Development Component",

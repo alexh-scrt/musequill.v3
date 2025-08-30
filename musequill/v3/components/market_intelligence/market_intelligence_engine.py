@@ -69,6 +69,15 @@ class MarketIntelligenceEngineConfig(BaseModel):
         le=1800,
         description="Maximum time for market intelligence gathering"
     )
+    
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return self.model_dump_json(indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'MarketIntelligenceEngineConfig':
+        """Create from JSON string."""
+        return cls.model_validate_json(json_str)
 
 
 class TrendAnalysis(BaseModel):
@@ -80,6 +89,15 @@ class TrendAnalysis(BaseModel):
     confidence_score: float = Field(ge=0.0, le=1.0, description="Confidence in trend analysis")
     supporting_evidence: List[str] = Field(description="Evidence supporting the trend")
     implications: List[str] = Field(description="Implications for content creation")
+    
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return self.model_dump_json(indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'TrendAnalysis':
+        """Create from JSON string."""
+        return cls.model_validate_json(json_str)
 
 
 class CompetitorInsight(BaseModel):
@@ -90,6 +108,15 @@ class CompetitorInsight(BaseModel):
     market_gaps: List[str] = Field(description="Identified market gaps")
     reader_preferences: List[str] = Field(description="Reader preferences observed")
     differentiation_opportunities: List[str] = Field(description="Opportunities to differentiate")
+    
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return self.model_dump_json(indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'CompetitorInsight':
+        """Create from JSON string."""
+        return cls.model_validate_json(json_str)
 
 
 class ReaderInsight(BaseModel):
@@ -100,6 +127,37 @@ class ReaderInsight(BaseModel):
     pain_points: List[str] = Field(description="Common complaints or issues")
     satisfaction_drivers: List[str] = Field(description="What drives reader satisfaction")
     engagement_patterns: Dict[str, Any] = Field(description="How readers engage with content")
+    
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return self.model_dump_json(indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'ReaderInsight':
+        """Create from JSON string."""
+        return cls.model_validate_json(json_str)
+
+
+class MarketIntelligenceReportEncoder(json.JSONEncoder):
+    """
+    Custom JSON encoder for MarketIntelligenceReport that handles datetime objects.
+    
+    This encoder allows standard json.dumps() to serialize MarketIntelligenceReport
+    objects and their nested Pydantic models by converting them to dictionaries
+    and datetime objects to ISO format strings.
+    
+    Usage:
+        json.dumps(report, cls=MarketIntelligenceReportEncoder)
+    """
+    
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        elif isinstance(obj, MarketIntelligenceReport):
+            return obj.model_dump()
+        elif hasattr(obj, 'model_dump'):  # Any Pydantic model
+            return obj.model_dump()
+        return super().default(obj)
 
 
 class MarketIntelligenceReport(BaseModel):
@@ -139,6 +197,28 @@ class MarketIntelligenceReport(BaseModel):
     data_sources: List[str] = Field(description="Sources of intelligence data")
     confidence_level: float = Field(ge=0.0, le=1.0, description="Overall confidence in analysis")
     next_update_recommended: datetime = Field(description="When next update is recommended")
+    
+    def to_json(self) -> str:
+        """Convert the report to JSON string with proper datetime serialization."""
+        return self.model_dump_json(indent=2)
+    
+    def to_json_with_encoder(self) -> str:
+        """Convert to JSON using the custom encoder for compatibility with json.dumps."""
+        return json.dumps(self, cls=MarketIntelligenceReportEncoder, indent=2)
+    
+    def __str__(self) -> str:
+        """String representation returns JSON."""
+        return self.to_json()
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'MarketIntelligenceReport':
+        """Create a MarketIntelligenceReport from JSON string."""
+        return cls.model_validate_json(json_str)
+    
+    @staticmethod
+    def json_encoder():
+        """Return the custom JSON encoder class for external use."""
+        return MarketIntelligenceReportEncoder
 
 
 class MarketIntelligenceEngineInput(BaseModel):
@@ -157,6 +237,15 @@ class MarketIntelligenceEngineInput(BaseModel):
     trend_analysis: bool = Field(default=True, description="Include trend analysis")
     reader_sentiment: bool = Field(default=True, description="Include reader sentiment")
     force_refresh: bool = Field(default=False, description="Force refresh of cached data")
+    
+    def to_json(self) -> str:
+        """Convert to JSON string."""
+        return self.model_dump_json(indent=2)
+    
+    @classmethod
+    def from_json(cls, json_str: str) -> 'MarketIntelligenceEngineInput':
+        """Create from JSON string."""
+        return cls.model_validate_json(json_str)
 
 
 class MarketIntelligenceEngine(BaseComponent[MarketIntelligenceEngineInput, MarketIntelligenceReport, MarketIntelligenceEngineConfig]):
@@ -785,7 +874,7 @@ class MarketIntelligenceEngine(BaseComponent[MarketIntelligenceEngineInput, Mark
         """Cache the intelligence report for future use."""
         cache_key = report.target_genre.lower()
         self._intelligence_cache[cache_key] = {
-            'report': report.dict(),
+            'report': report.model_dump(),
             'timestamp': datetime.now()
         }
     

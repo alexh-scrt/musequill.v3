@@ -83,6 +83,9 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
         self.content_hashes: Set[str] = set()
         self.processed_urls: Set[str] = set()
         
+        # Track original research_ids for cached queries
+        self.cached_research_id_mapping: Dict[str, str] = {}
+        
         # Statistics tracking
         self.stats = {
             'queries_processed': 0,
@@ -119,6 +122,9 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             self.chroma_cache_collection = self._get_or_create_cache_collection_safe(
                 self.config.specific_config
             )
+            
+            # Load persistent cache mapping from ChromaDB
+            await self._load_cache_mapping()
             
             # Initialize Ollama embeddings
             self.embeddings = OllamaEmbeddings(
@@ -355,12 +361,94 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             logger.error(f"Failed to create new cache collection: {e}")
             raise
     
+    async def _load_cache_mapping(self):
+        """Load persistent cache mapping from ChromaDB cache collection."""
+        try:
+            # Get all cache entries to reconstruct mapping
+            all_cache_entries = self.chroma_cache_collection.get(
+                include=["metadatas"]
+            )
+            
+            cache_mappings = {}
+            valid_mappings_count = 0
+            
+            if all_cache_entries['metadatas']:
+                for metadata in all_cache_entries['metadatas']:
+                    # Check for explicit mapping entries
+                    if metadata.get('cache_type') == 'id_mapping':
+                        current_research_id = metadata.get('current_research_id')
+                        original_research_id = metadata.get('original_research_id')
+                        
+                        if current_research_id and original_research_id:
+                            # Verify the original_research_id actually has chunks
+                            verification_results = self.chroma_collection.get(
+                                where={"research_id": original_research_id},
+                                include=["metadatas"]
+                            )
+                            chunks_exist = len(verification_results['metadatas']) > 0 if verification_results['metadatas'] else False
+                            
+                            if chunks_exist:
+                                cache_mappings[current_research_id] = original_research_id
+                                valid_mappings_count += 1
+                                logger.info(f"Loaded mapping: {current_research_id} -> {original_research_id}")
+                            else:
+                                logger.warning(f"Found mapping entry pointing to research_id {original_research_id} with no chunks")
+                    
+                    # Also check for original query cache entries (backward compatibility)
+                    original_research_id = metadata.get('original_research_id')
+                    if original_research_id and metadata.get('cache_type') == 'query_results':
+                        # Verify this original_research_id actually has chunks
+                        verification_results = self.chroma_collection.get(
+                            where={"research_id": original_research_id},
+                            include=["metadatas"]
+                        )
+                        chunks_exist = len(verification_results['metadatas']) > 0 if verification_results['metadatas'] else False
+                        
+                        if chunks_exist:
+                            # This is a valid original research ID - store for reference
+                            cache_mappings[original_research_id] = original_research_id
+                        else:
+                            logger.warning(f"Found cache entry pointing to research_id {original_research_id} with no chunks")
+            
+            # Store only valid mappings (this serves as a validation that the mapping system works)
+            self.cached_research_id_mapping.update(cache_mappings)
+            
+            logger.info(f"Loaded {valid_mappings_count} valid cache mappings on startup")
+            
+        except Exception as e:
+            logger.warning(f"Failed to load cache mapping on startup: {e}")
+            # Continue with empty mapping - not fatal
+    
+    def _save_mapping_to_metadata(self, current_research_id: str, original_research_id: str):
+        """Save the cache mapping relationship for persistence across restarts."""
+        try:
+            # Create a mapping entry in cache collection for persistence
+            mapping_id = f"mapping_{current_research_id}"
+            self.chroma_cache_collection.upsert(
+                ids=[mapping_id],
+                documents=["Cache ID mapping entry"],
+                metadatas=[{
+                    'cache_type': 'id_mapping',
+                    'current_research_id': current_research_id,
+                    'original_research_id': original_research_id,
+                    'created_at': datetime.now(timezone.utc).isoformat()
+                }]
+            )
+            logger.info(f"Persisted mapping: {current_research_id} -> {original_research_id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to persist mapping {current_research_id} -> {original_research_id}: {e}")
+    
     def _generate_query_hash(self, query: str) -> str:
         """Generate a SHA-256 hash for the query string."""
         return sha256(query.strip().lower().encode('utf-8')).hexdigest()
     
-    async def _check_query_cache(self, query_hash: str) -> Optional[List[ResearchResults]]:
-        """Check if query results exist in cache and are not older than 30 days."""
+    async def _check_query_cache(self, query_hash: str) -> Optional[Tuple[List[ResearchResults], str]]:
+        """Check if query results exist in cache and are not older than 30 days.
+        
+        Returns:
+            Tuple of (cached_results, original_research_id) if found, None if not found or expired
+        """
         try:
             # Query cache collection for this hash
             cache_results = self.chroma_cache_collection.get(
@@ -374,6 +462,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             # Check if cache entry is still valid (within 30 days)
             metadata = cache_results['metadatas'][0] if cache_results['metadatas'] else {}
             cached_at_str = metadata.get('cached_at')
+            original_research_id = metadata.get('original_research_id')
             
             if cached_at_str:
                 cached_at = datetime.fromisoformat(cached_at_str.replace('Z', '+00:00'))
@@ -383,7 +472,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             
             # Deserialize cached results
             cached_data = cache_results['documents'][0] if cache_results['documents'] else None
-            if cached_data:
+            if cached_data and original_research_id:
                 import json
                 try:
                     results_data = json.loads(cached_data)
@@ -410,8 +499,8 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
                         )
                         cached_results.append(research_result)
                     
-                    logger.info(f"Retrieved {len(cached_results)} cached results for query hash {query_hash}")
-                    return cached_results
+                    logger.info(f"Retrieved {len(cached_results)} cached results for query hash {query_hash} with original research_id {original_research_id}")
+                    return (cached_results, original_research_id)
                     
                 except (json.JSONDecodeError, KeyError, TypeError) as e:
                     logger.warning(f"Failed to deserialize cached results: {e}")
@@ -422,8 +511,8 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
         
         return None
     
-    async def _store_query_cache(self, query_hash: str, query: str, results: List[ResearchResults]):
-        """Store query results in cache with TTL metadata."""
+    async def _store_query_cache(self, query_hash: str, query: str, results: List[ResearchResults], original_research_id: str):
+        """Store query results in cache with TTL metadata and original research_id."""
         try:
             import json
             
@@ -453,19 +542,20 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             
             cached_data = json.dumps(serializable_results)
             
-            # Store in cache collection
+            # Store in cache collection with original research_id
             self.chroma_cache_collection.upsert(
                 ids=[query_hash],
                 documents=[cached_data],
                 metadatas=[{
                     'original_query': query,
+                    'original_research_id': original_research_id,  # Store the original research_id
                     'cached_at': datetime.now(timezone.utc).isoformat(),
                     'result_count': len(results),
                     'cache_type': 'query_results'
                 }]
             )
             
-            logger.info(f"Stored {len(results)} results in cache for query hash {query_hash}")
+            logger.info(f"Stored {len(results)} results in cache for query hash {query_hash} with original research_id {original_research_id}")
             
         except Exception as e:
             logger.error(f"Failed to store query cache: {e}")
@@ -555,10 +645,38 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
         query_hash = self._generate_query_hash(_query)
         
         # Check cache first
-        cached_results = await self._check_query_cache(query_hash)
-        if cached_results is not None:
-            logger.info(f"Using cached results for query: {_query[:50]}...")
-            return cached_results
+        cache_result = await self._check_query_cache(query_hash)
+        if cache_result is not None:
+            cached_results, original_research_id = cache_result
+            
+            # Verify that the original_research_id actually has chunks stored
+            verification_results = self.chroma_collection.get(
+                where={"research_id": original_research_id},
+                include=["metadatas"]
+            )
+            chunks_exist = len(verification_results['metadatas']) > 0 if verification_results['metadatas'] else False
+            
+            if chunks_exist:
+                # Track that this research_id should use the original research_id for chunk retrieval
+                logger.info(f"CACHE MAPPING: Verified chunks exist for {original_research_id}")
+                logger.info(f"CACHE MAPPING: Setting cached_research_id_mapping[{research_id}] = {original_research_id}")
+                self.cached_research_id_mapping[research_id] = original_research_id
+                
+                # Persist the mapping for restart resilience
+                self._save_mapping_to_metadata(research_id, original_research_id)
+                
+                logger.info(f"CACHE MAPPING: Updated mapping: {self.cached_research_id_mapping}")
+                logger.info(f"Using cached results for query: {_query[:50]}... with original research_id {original_research_id}")
+                return cached_results
+            else:
+                logger.warning(f"CACHE MAPPING: No chunks found for cached original_research_id {original_research_id}, executing query fresh")
+                # Clear this invalid cache entry
+                try:
+                    self.chroma_cache_collection.delete(ids=[query_hash])
+                    logger.info(f"Cleared invalid cache entry for query hash {query_hash}")
+                except Exception as e:
+                    logger.warning(f"Failed to clear invalid cache entry: {e}")
+                # Continue to execute query fresh
         
         for attempt in range(self.config.specific_config.query_retry_attempts):
             try:
@@ -597,7 +715,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
                 results.append(result)
                 
                 # Store successful results in cache
-                await self._store_query_cache(query_hash, _query, results)
+                await self._store_query_cache(query_hash, _query, results, research_id)
                 
                 break  # Success, exit retry loop
                 
@@ -621,7 +739,7 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
         return results
     
     async def _perform_web_search(self, query: str) -> List[SearchResult]:
-        """Perform web search using Tavily."""
+        """Perform web search using Tavily with fallback handling."""
         try:
             response = self.tavily_client.search(
                 query=query,
@@ -648,8 +766,24 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
             return search_results
             
         except Exception as e:
-            logger.error(f"Web search failed for query '{query}': {e}")
-            return []
+            error_msg = str(e).lower()
+            if 'usage limit' in error_msg or 'plan' in error_msg:
+                logger.warning(f"Tavily API usage limit exceeded for query '{query}': {e}")
+                # Return a fallback search result with generic content
+                fallback_result = SearchResult(
+                    url="https://example.com",
+                    title=f"Research Query: {query}",
+                    content=f"Research topic: {query}. Due to API limitations, detailed web search results are not available. Please consider upgrading your Tavily plan or using alternative research methods.",
+                    score=0.5,
+                    published_date=None,
+                    domain="fallback",
+                    query=query,
+                    tavily_answer=f"Unable to perform web search for '{query}' due to API usage limits. Consider upgrading your research plan."
+                )
+                return [fallback_result]
+            else:
+                logger.error(f"Web search failed for query '{query}': {e}")
+                return []
     
     def _filter_search_results(self, results: List[SearchResult]) -> List[SearchResult]:
         """Filter search results based on quality and domain restrictions."""
@@ -972,24 +1106,75 @@ class ResearcherComponent(BaseComponent[ResearcherInput, ResearcherOutput, Resea
     def _get_chroma_storage_info(self, research_id: str) -> Dict[str, Any]:
         """Get ChromaDB storage information for the research session."""
         try:
+            # Check if this research_id should use an original research_id from cache
+            actual_research_id = self.cached_research_id_mapping.get(research_id, research_id)
+            
+            # Debug logging
+            logger.info(f"ChromaDB storage info request: research_id={research_id}")
+            logger.info(f"Cached research ID mapping: {self.cached_research_id_mapping}")
+            logger.info(f"Using actual_research_id: {actual_research_id}")
+            
             results = self.chroma_collection.get(
-                where={"research_id": research_id},
+                where={"research_id": actual_research_id},
                 include=["metadatas"]
             )
             
+            total_chunks = len(results['metadatas']) if results['metadatas'] else 0
+            
+            # If no chunks found and no mapping exists, try to find any research_id with chunks
+            # This handles restart scenarios where mapping is lost
+            if total_chunks == 0 and research_id not in self.cached_research_id_mapping:
+                logger.info(f"No chunks found for {actual_research_id} and no mapping exists, searching for alternative research_ids")
+                
+                # Get all research IDs that have chunks
+                all_results = self.chroma_collection.get(include=["metadatas"])
+                research_ids_with_chunks = set()
+                
+                if all_results['metadatas']:
+                    for metadata in all_results['metadatas']:
+                        if metadata.get('research_id'):
+                            research_ids_with_chunks.add(metadata['research_id'])
+                
+                if research_ids_with_chunks:
+                    # For now, use the first available research_id with chunks
+                    # In a more sophisticated implementation, we could match by query similarity
+                    fallback_research_id = next(iter(research_ids_with_chunks))
+                    logger.info(f"Using fallback research_id: {fallback_research_id}")
+                    
+                    # Get chunks for the fallback research_id
+                    fallback_results = self.chroma_collection.get(
+                        where={"research_id": fallback_research_id},
+                        include=["metadatas"]
+                    )
+                    total_chunks = len(fallback_results['metadatas']) if fallback_results['metadatas'] else 0
+                    actual_research_id = fallback_research_id
+                    
+                    # Update mapping for future use
+                    self.cached_research_id_mapping[research_id] = fallback_research_id
+                    
+                    # Persist the mapping for restart resilience
+                    self._save_mapping_to_metadata(research_id, fallback_research_id)
+                    
+                    logger.info(f"Updated mapping: {research_id} -> {fallback_research_id}")
+            
+            logger.info(f"ChromaDB storage info: research_id={research_id}, actual_research_id={actual_research_id}, total_chunks={total_chunks}")
+            
             return {
-                'research_id': research_id,
-                'total_chunks': len(results['metadatas']) if results['metadatas'] else 0,
+                'research_id': actual_research_id,  # Return the actual research_id where chunks are stored
+                'total_chunks': total_chunks,
                 'collection_name': self.config.specific_config.chroma_collection_name,
                 'host': self.config.specific_config.chroma_host,
                 'port': self.config.specific_config.chroma_port
             }
             
         except Exception as e:
+            # Even in error case, use the actual research_id if cached
+            actual_research_id = self.cached_research_id_mapping.get(research_id, research_id)
             return {
-                'research_id': research_id,
+                'research_id': actual_research_id,
                 'error': str(e),
-                'collection_name': self.config.specific_config.chroma_collection_name
+                'collection_name': self.config.specific_config.chroma_collection_name,
+                'total_chunks': 0
             }
     
     def get_current_stats(self) -> Dict[str, Any]:

@@ -413,4 +413,17 @@ async def main():
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    import sys
+    import warnings
+    
+    # Suppress threading cleanup warnings in Python 3.13
+    warnings.filterwarnings("ignore", message=".*_DeleteDummyThreadOnDel.*")
+    
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nShutdown requested...")
+        sys.exit(0)
+    except Exception as e:
+        print(f"Pipeline execution failed: {e}")
+        sys.exit(1)

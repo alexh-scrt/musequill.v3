@@ -36,6 +36,10 @@ from musequill.v3.models.llm_discriminator_models import (
     CritiqueDimension
 )
 
+from musequill.v3.components.character_developer.character_development_config import (
+    create_character_development_config_from_dict
+)
+
 logger = logging.getLogger(__name__)
 
 class PipelineState(str, Enum):
@@ -521,6 +525,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 self._character_developer = component_registry.get_component(developer_id)
                 await self._character_developer.initialize()
                 await self._character_developer.start()
+                logger.info("✅ Character Developer initialized successfully")
 
             if 'llm_discriminator' in component_configs:
                 llm_config = self._create_llm_discriminator_config()
@@ -550,7 +555,23 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         """Create configurations for all pipeline components."""
         # Placeholder - in real implementation would load from config files
         config = self.config.specific_config.components
+
+        character_dev_config = create_character_development_config_from_dict(
+            config.get('character_developer', {})
+        )
+
+
         return {
+            'character_developer': ComponentConfiguration(
+                component_type=ComponentType.GENERATOR,  # Character development is generative
+                component_name="Character Development Component",
+                version="1.0.0",
+                max_concurrent_executions=1,
+                execution_timeout_seconds=character_dev_config.max_processing_time_seconds,
+                auto_recycle_after_uses=100,
+                recycle_on_error_count=3,
+                specific_config=character_dev_config
+            ),
             'chapter_generator': ComponentConfiguration(
                 component_type=ComponentType.GENERATOR,
                 component_name="Chapter Generator",

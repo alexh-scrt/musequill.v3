@@ -114,7 +114,14 @@ class PipelineResearcher:
     
     def __init__(self, config: PipelineResearcherConfig):
         self.config = config
-        self.tavily_client = TavilyClient(api_key=config.tavily_api_key)
+        
+        # Handle API key initialization with fallback
+        try:
+            self.tavily_client = TavilyClient(api_key=config.tavily_api_key)
+        except Exception as e:
+            logger.warning(f"Failed to initialize Tavily client: {e}. Research will use fallback mode.")
+            self.tavily_client = None
+            
         self.researcher_component = None  # Will be initialized lazily
         self.active_requests: Dict[str, ResearchRequest] = {}
         self.request_queue: List[ResearchRequest] = []

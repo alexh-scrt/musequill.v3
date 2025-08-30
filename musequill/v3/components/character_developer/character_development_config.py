@@ -19,6 +19,7 @@ class CharacterDevelopmentStrategy(str, Enum):
     INTERNAL_JOURNEY = "internal_journey"  # Focus on internal conflicts and growth
     PLOT_RESPONSIVE = "plot_responsive"    # Development responds to plot events
     MARKET_OPTIMIZED = "market_optimized"  # Development based on market preferences
+    FAST_PROTOTYPING = "fast_prototyping"
 
 
 class VoiceConsistencyLevel(str, Enum):
@@ -214,7 +215,7 @@ class CharacterDevelopmentConfig(BaseModel):
 def create_character_development_config_from_dict(config_dict: Dict[str, Any]) -> CharacterDevelopmentConfig:
     """Create CharacterDevelopmentConfig from configuration dictionary."""
     
-    character_dev_settings = config_dict.get('components', {}).get('character_developer', {})
+    character_dev_settings = config_dict or {}
     
     # Map strategy string to enum
     strategy_str = character_dev_settings.get('development_strategy', 'gradual_arc')

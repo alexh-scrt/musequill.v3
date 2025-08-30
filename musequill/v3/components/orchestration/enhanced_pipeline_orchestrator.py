@@ -46,6 +46,11 @@ from musequill.v3.components.market_intelligence.market_intelligence_engine impo
     MarketIntelligenceEngineInput
 )
 
+from musequill.v3.models.character_arc import (
+    CharacterArc,
+    NarrativeFunction
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,7 +209,8 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
             'reader_engagement_critic': self._reader_engagement_critic,
             'quality_controller': self._quality_controller,
             'market_intelligence': self._market_intelligence_engine,
-            'llm_discriminator': self._llm_discriminator
+            'llm_discriminator': self._llm_discriminator,
+            'character_developer': self._character_developer
         }
 
         for component_name, component in self.components.items():
@@ -231,12 +237,13 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
             story_state=story_state or self.story_state
         )
         
-        return await self.researcher.research(
-            query=query,
-            scope=scope,
-            priority=ResearchPriority.HIGH,
-            context=context
-        )
+        raise NotImplementedError
+        # return await self.researcher.research(
+        #     query=query,
+        #     scope=scope,
+        #     priority=ResearchPriority.HIGH,
+        #     context=context
+        # )
     
     # AUTOMATIC RESEARCH TRIGGERS
     
@@ -868,11 +875,11 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         return story_state
     
     async def _character_development_with_research(self, story_state: Dict[str, Any]) -> Dict[str, Any]:
-        # This method already exists in enhanced_pipeline_orchestrator.py
+        """Character development stage with research integration - FIXED VERSION."""
         config = story_state['config']
         genre = config.get('genre', 'general')
         
-        # Research character development techniques (already implemented)
+        # Research character development techniques
         character_research = await self.researcher.deep_research(
             topic=f"{genre} character development techniques",
             specific_questions=[
@@ -891,26 +898,272 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         # Execute character development component
         character_component = self.get_component('character_developer')
         if character_component:
+            # CORRECTED IMPORT PATH
             from musequill.v3.components.character_developer.character_development_models import CharacterDevelopmentInput
+            from musequill.v3.models.character_arc import CharacterArc, VoiceCharacteristics, NarrativeFunction, CharacterStability
+            
+            # Extract refined research insights from chroma results
+            research_insights = None
+            if character_research.status == "completed" and character_research.results:
+                chroma_info = character_research.results.get('chroma_storage_info', {})
+                
+                if chroma_info and chroma_info.get('total_chunks', 0) > 0:
+                    # Use chroma_storage_info to access the ChromaDB store
+                    collection_name = chroma_info['collection_name']
+                    research_id = chroma_info['research_id']
+                    host = chroma_info['host']
+                    port = chroma_info['port']
+                    
+                    # Access ChromaDB to retrieve stored research results
+                    try:
+                        import chromadb
+                        chroma_client = chromadb.HttpClient(host=host, port=port)
+                        collection = chroma_client.get_collection(name=collection_name)
+                        
+                        # Query all documents related to this research_id
+                        results = collection.get(
+                            where={"research_id": research_id},
+                            include=["documents", "metadatas"]
+                        )
+                        
+                        # Transform results into organized format
+                        research_insights = {}
+                        for doc, metadata in zip(results['documents'], results['metadatas']):
+                            category = metadata.get('query_category', 'General')
+                            if category not in research_insights:
+                                research_insights[category] = []
+                            research_insights[category].append(doc)
+                            
+                    except Exception as e:
+                        print(f"Warning: Could not retrieve ChromaDB results: {e}")
+                        # Fallback to basic results
+                        research_insights = character_research.results
+                else:
+                    # No chunks stored, fallback to basic results
+                    research_insights = character_research.results
+            
+            # Construct characters from story_state
+            characters = self._construct_characters_from_story_state(story_state)
+            
+            # Extract market intelligence data safely using helper methods
+            market_intel = story_state.get('market_intelligence', {})
+            market_preferences = self._safe_get_attribute(market_intel, 'reader_preferences')
+            success_patterns = self._safe_get_attribute(market_intel, 'success_patterns')
             
             character_input = CharacterDevelopmentInput(
-                characters=story_state.get('characters', {}),
+                characters=characters,
                 current_chapter=story_state.get('current_chapter', 1),
                 plot_outline=story_state.get('plot_outline', {}),
                 genre=genre,
-                market_preferences=story_state.get('market_intelligence', {}).get('reader_preferences'),
-                success_patterns=story_state.get('market_intelligence', {}).get('success_patterns'),
-                research_insights=character_research.results if character_research.status == "completed" else None,
+                market_preferences=market_preferences,
+                success_patterns=success_patterns,
+                research_insights=research_insights,
                 chapter_objectives=story_state.get('chapter_objectives', []),
                 constraints=story_state.get('constraints', {}),
                 force_development=story_state.get('force_character_development', [])
             )
             
+            # USE invoke() method from BaseComponent interface
             character_result = await character_component.invoke(character_input)
             story_state['characters'] = character_result.updated_characters
             story_state['character_development_result'] = character_result
+        else:
+            logger.warning("Character developer component not available")
         
         return story_state
+    
+    def _construct_characters_from_story_state(self, story_state: Dict[str, Any]) -> Dict[str, CharacterArc]:
+        """Construct CharacterArc objects from story_state configuration."""
+        from musequill.v3.models.character_arc import CharacterArc, VoiceCharacteristics, NarrativeFunction, CharacterStability
+        
+        characters = {}
+        config = story_state.get('config', {})
+        current_chapter = story_state.get('current_chapter', 1)
+        
+        # Process main character
+        main_char = config.get('main_character')
+        if main_char:
+            char_id = f"main_{main_char.get('name', 'character').lower().replace(' ', '_')}"
+            characters[char_id] = self._create_character_arc_from_config(
+                main_char, char_id, NarrativeFunction.PROTAGONIST, current_chapter
+            )
+        
+        # Process supporting characters
+        supporting_chars = config.get('supporting_characters', [])
+        for i, char_data in enumerate(supporting_chars):
+            char_id = f"supporting_{char_data.get('name', f'character_{i}').lower().replace(' ', '_')}"
+            
+            # Determine narrative function from role
+            role = char_data.get('role', 'support').lower()
+            if role == 'antagonist':
+                narrative_function = NarrativeFunction.ANTAGONIST
+            elif role == 'mentor':
+                narrative_function = NarrativeFunction.MENTOR
+            elif role == 'ally':
+                narrative_function = NarrativeFunction.SUPPORT
+            elif role == 'catalyst':
+                narrative_function = NarrativeFunction.CATALYST
+            elif role == 'foil':
+                narrative_function = NarrativeFunction.FOIL
+            else:
+                narrative_function = NarrativeFunction.SUPPORT
+            
+            characters[char_id] = self._create_character_arc_from_config(
+                char_data, char_id, narrative_function, current_chapter
+            )
+        
+        return characters
+    
+    def _create_character_arc_from_config(
+        self, 
+        char_data: Dict[str, Any], 
+        char_id: str, 
+        narrative_function: NarrativeFunction,
+        current_chapter: int
+    ) -> CharacterArc:
+        """Create a CharacterArc from character configuration data."""
+        from musequill.v3.models.character_arc import CharacterArc, VoiceCharacteristics, CharacterStability
+        
+        name = char_data.get('name', 'Unnamed Character')
+        background = char_data.get('background', '')
+        motivation = char_data.get('motivation', '')
+        personality_traits = char_data.get('personality_traits', [])
+        
+        # Create voice characteristics based on background and traits
+        voice_chars = VoiceCharacteristics(
+            vocabulary_level=self._infer_vocabulary_level(background, personality_traits),
+            speech_patterns=[],  # Would be populated later or from more detailed config
+            formality_level=self._infer_formality_level(background, personality_traits),
+            emotional_expressiveness=self._infer_emotional_expressiveness(personality_traits),
+            dialogue_quirks=[]  # Would be populated later or from more detailed config
+        )
+        
+        # Create character arc
+        char_arc = CharacterArc(
+            character_id=char_id,
+            name=name,
+            emotional_state=self._infer_initial_emotional_state(motivation, personality_traits),
+            stability=CharacterStability.STABLE,  # Default, could be inferred
+            narrative_function=narrative_function,
+            voice_characteristics=voice_chars,
+            last_development_chapter=1,  # Assume introduced in chapter 1
+            introduction_chapter=1,
+            personality_traits=personality_traits if isinstance(personality_traits, list) else [],
+            goals_motivations=[motivation] if motivation else [],
+            remaining_obstacles=self._infer_initial_obstacles(motivation, background),
+            internal_conflicts=self._infer_internal_conflicts(personality_traits, motivation)
+        )
+        
+        return char_arc
+    
+    def _infer_vocabulary_level(self, background: str, traits: List[str]) -> str:
+        """Infer vocabulary level from character background and traits."""
+        background_lower = background.lower() if background else ""
+        traits_lower = [t.lower() for t in traits] if traits else []
+        
+        # Check for academic/professional indicators
+        academic_indicators = ['professor', 'doctor', 'researcher', 'scientist', 'academic', 'scholar']
+        professional_indicators = ['lawyer', 'executive', 'manager', 'consultant', 'analyst']
+        
+        if any(indicator in background_lower for indicator in academic_indicators):
+            return "academic"
+        elif any(indicator in background_lower for indicator in professional_indicators):
+            return "complex"
+        elif any(trait in traits_lower for trait in ['intelligent', 'brilliant', 'educated']):
+            return "complex"
+        elif any(trait in traits_lower for trait in ['simple', 'down-to-earth', 'practical']):
+            return "simple"
+        else:
+            return "moderate"
+    
+    def _infer_formality_level(self, background: str, traits: List[str]) -> str:
+        """Infer formality level from character background and traits."""
+        background_lower = background.lower() if background else ""
+        traits_lower = [t.lower() for t in traits] if traits else []
+        
+        formal_indicators = ['professor', 'doctor', 'executive', 'diplomat', 'judge']
+        casual_indicators = ['hacker', 'artist', 'rebel', 'street', 'young']
+        
+        if any(indicator in background_lower for indicator in formal_indicators):
+            return "formal"
+        elif any(indicator in background_lower for indicator in casual_indicators):
+            return "casual"
+        elif any(trait in traits_lower for trait in ['formal', 'proper', 'dignified']):
+            return "formal"
+        elif any(trait in traits_lower for trait in ['casual', 'relaxed', 'informal', 'rebellious']):
+            return "casual"
+        else:
+            return "informal"
+    
+    def _infer_emotional_expressiveness(self, traits: List[str]) -> str:
+        """Infer emotional expressiveness from personality traits."""
+        traits_lower = [t.lower() for t in traits] if traits else []
+        
+        if any(trait in traits_lower for trait in ['dramatic', 'expressive', 'passionate', 'emotional']):
+            return "expressive"
+        elif any(trait in traits_lower for trait in ['reserved', 'stoic', 'controlled', 'calm']):
+            return "reserved"
+        elif any(trait in traits_lower for trait in ['intense', 'fiery', 'volatile']):
+            return "dramatic"
+        else:
+            return "moderate"
+    
+    def _infer_initial_emotional_state(self, motivation: str, traits: List[str]) -> str:
+        """Infer initial emotional state from motivation and traits."""
+        motivation_lower = motivation.lower() if motivation else ""
+        traits_lower = [t.lower() for t in traits] if traits else []
+        
+        # Look for emotional indicators in motivation
+        if any(word in motivation_lower for word in ['protect', 'save', 'help']):
+            return "determined and protective"
+        elif any(word in motivation_lower for word in ['revenge', 'justice', 'expose']):
+            return "driven and focused"
+        elif any(word in motivation_lower for word in ['discover', 'find', 'learn']):
+            return "curious and motivated"
+        elif any(trait in traits_lower for trait in ['anxious', 'worried', 'fearful']):
+            return "anxious but determined"
+        elif any(trait in traits_lower for trait in ['confident', 'bold', 'brave']):
+            return "confident and ready"
+        else:
+            return "focused and purposeful"
+    
+    def _infer_initial_obstacles(self, motivation: str, background: str) -> List[str]:
+        """Infer initial obstacles from character motivation and background."""
+        obstacles = []
+        motivation_lower = motivation.lower() if motivation else ""
+        background_lower = background.lower() if background else ""
+        
+        # Common obstacles based on motivation themes
+        if "protect" in motivation_lower:
+            obstacles.append("Balancing personal safety with protective instincts")
+        if "technology" in motivation_lower or "corporate" in motivation_lower:
+            obstacles.append("Overcoming corporate/institutional power")
+        if "past" in background_lower or "former" in background_lower:
+            obstacles.append("Dealing with consequences of past decisions")
+        if not obstacles:  # Default obstacles
+            obstacles.append("Learning to trust others")
+            obstacles.append("Overcoming self-doubt")
+        
+        return obstacles
+    
+    def _infer_internal_conflicts(self, traits: List[str], motivation: str) -> List[str]:
+        """Infer internal conflicts from personality traits and motivation."""
+        conflicts = []
+        traits_lower = [t.lower() for t in traits] if traits else []
+        motivation_lower = motivation.lower() if motivation else ""
+        
+        # Look for conflicting traits or challenging motivations
+        if any(trait in traits_lower for trait in ['brilliant', 'intelligent']) and any(trait in traits_lower for trait in ['haunted', 'guilty']):
+            conflicts.append("Intelligence vs emotional burden from past")
+        if "protect" in motivation_lower and any(trait in traits_lower for trait in ['independent', 'lone']):
+            conflicts.append("Desire to protect vs tendency to work alone")
+        if any(trait in traits_lower for trait in ['ethical', 'moral']) and "corporate" in motivation_lower:
+            conflicts.append("Personal ethics vs practical necessities")
+        if not conflicts:  # Default conflicts
+            conflicts.append("Balancing personal needs with greater responsibilities")
+        
+        return conflicts
+
     
     async def _chapter_generation_with_research(self, story_state: Dict[str, Any]) -> Dict[str, Any]:
         """Chapter generation stage with research integration."""
@@ -953,6 +1206,35 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         return story_state
     
     # HELPER METHODS
+    
+    def _safe_get_attribute(self, obj: Any, attribute: str, default: Any = None) -> Any:
+        """Safely get an attribute from an object or dictionary."""
+        if hasattr(obj, attribute):
+            return getattr(obj, attribute)
+        elif isinstance(obj, dict):
+            return obj.get(attribute, default)
+        else:
+            return default
+    
+    def _safe_get_nested_attribute(self, obj: Any, path: str, default: Any = None) -> Any:
+        """Safely get a nested attribute using dot notation."""
+        try:
+            current = obj
+            for part in path.split('.'):
+                current = self._safe_get_attribute(current, part)
+                if current is None:
+                    return default
+            return current
+        except (AttributeError, KeyError, TypeError):
+            return default
+    
+    def _safe_get_score(self, obj: Any, score_field: str = 'overall_score', default: float = 0.0) -> float:
+        """Safely extract a score from an object or dict."""
+        score = self._safe_get_attribute(obj, score_field, default)
+        try:
+            return float(score)
+        except (ValueError, TypeError):
+            return default
     
     def _setup_default_research_rules(self):
         """Setup default automatic research rules."""
@@ -1003,7 +1285,10 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         if not market_intel:
             return True
         
-        last_update = market_intel.get('last_updated')
+        # Safely access timestamp field from MarketIntelligenceReport or dict
+        last_update = (self._safe_get_attribute(market_intel, 'generated_at') or 
+                      self._safe_get_attribute(market_intel, 'last_updated'))
+        
         if not last_update:
             return True
         
@@ -1027,11 +1312,34 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
     def _character_development_gaps(self, state: Dict[str, Any]) -> bool:
         """Check if character development has gaps needing research."""
         characters = state.get('characters', {})
+        character_development_result = state.get('character_development_result', {})
+        
         if not characters:
             return False
         
-        # Check for character development issues
-        char_scores = [char.get('development_score', 1.0) for char in characters.values()]
+        # Check for character development issues using safe access methods
+        char_scores = []
+        
+        # First try to get scores from character_development_result assessments
+        assessments = self._safe_get_attribute(character_development_result, 'assessments', {})
+        
+        if assessments:
+            for assessment in assessments.values():
+                score = self._safe_get_score(assessment, 'overall_health_score', 1.0)
+                char_scores.append(score)
+        else:
+            # Fallback: use CharacterArc objects directly
+            for char in characters.values():
+                development_staleness = self._safe_get_attribute(char, 'development_staleness', 0)
+                if development_staleness is not None:
+                    # Convert development_staleness to a score (lower staleness = higher score)
+                    score = max(0.0, 1.0 - (float(development_staleness) / 10.0))
+                    char_scores.append(score)
+                else:
+                    # Try other score fields or use default
+                    score = self._safe_get_score(char, 'development_score', 0.7)
+                    char_scores.append(score)
+        
         avg_score = sum(char_scores) / len(char_scores) if char_scores else 1.0
         return avg_score < 0.7
     
