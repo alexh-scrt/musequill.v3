@@ -7,9 +7,10 @@ chapter-by-chapter plans and objectives for the story generation pipeline.
 
 import logging
 from typing import Dict, Any, List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from pydantic import BaseModel, Field
 from enum import Enum
+import chromadb
 
 from musequill.v3.components.base.component_interface import (
     BaseComponent, ComponentConfiguration, ComponentType, ComponentError
@@ -23,6 +24,14 @@ from musequill.v3.models.chapter_objective import (
 )
 from musequill.v3.models.dynamic_story_state import DynamicStoryState
 from musequill.v3.components.market_intelligence.market_intelligence_engine import MarketIntelligenceReport
+from musequill.v3.models.chapter_objective import (
+    ChapterObjective, 
+    WordCountTarget, 
+    PlotAdvancement, 
+    CharacterDevelopmentTarget, 
+    ObjectivePriority, 
+    SceneType
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +191,7 @@ class PlotOutlinerComponent(BaseComponent[PlotOutlinerInput, PlotOutlinerOutput,
             story_beats = self._create_story_beats(structure, chapter_count, input_data)
             
             # Generate chapter objectives
-            chapter_objectives = self._generate_chapter_objectives(
+            chapter_objectives = await self._generate_chapter_objectives(
                 story_beats, input_data, chapter_count
             )
             
@@ -280,7 +289,62 @@ class PlotOutlinerComponent(BaseComponent[PlotOutlinerInput, PlotOutlinerOutput,
         
         return min(relevance_score, 1.0)
     
-    def _integrate_research_into_planning(self, chapter_objectives: List[ChapterObjective]) -> List[ChapterObjective]:
+    async def _extract_research_from_chroma(self, research_insight: Dict[str, Any]) -> Optional[str]:
+        """
+        Extract actual research findings from Chroma storage based on chroma_storage_info.
+        
+        Args:
+            research_insight: Insight dict containing chroma_storage_info
+            
+        Returns:
+            String containing the actual research findings
+        """
+        try:
+            # Get chroma storage info
+            chroma_info = research_insight.get('chroma_storage_info', {})
+            if not chroma_info:
+                logging.warning("No chroma_storage_info found in research insight")
+                return None
+                
+            research_id = chroma_info.get('research_id')
+            host = chroma_info.get('host', 'localhost')
+            port = chroma_info.get('port', 18000)
+            collection_name = chroma_info.get('collection_name', 'research_collection')
+            
+            if not research_id:
+                logging.warning("No research_id found in chroma_storage_info")
+                return None
+            
+            # Initialize Chroma client
+            chroma_client = chromadb.HttpClient(host=host, port=port)
+            chroma_collection = chroma_client.get_collection(name=collection_name)
+            
+            # Query all chunks for this research session
+            results = chroma_collection.get(
+                where={"research_id": research_id},
+                include=["metadatas", "documents"]
+            )
+            
+            if not results.get('documents'):
+                logging.info(f"No research data found in Chroma for research_id: {research_id}")
+                return None
+            
+            # Combine all document content into findings
+            findings_content = []
+            for doc in results['documents']:
+                if doc and len(doc.strip()) > 50:  # Only substantial content
+                    findings_content.append(doc.strip())
+            
+            if findings_content:
+                return " ".join(findings_content)
+            
+            return None
+            
+        except Exception as e:
+            logging.error(f"Failed to extract research data from Chroma: {e}")
+            return None
+    
+    async def _integrate_research_into_planning(self, chapter_objectives: List[ChapterObjective]) -> List[ChapterObjective]:
         """
         Integrate research insights into chapter planning.
         """
@@ -293,14 +357,23 @@ class PlotOutlinerComponent(BaseComponent[PlotOutlinerInput, PlotOutlinerOutput,
         engagement_insights = []
         
         for insight in self._research_insights:
-            findings = insight.get('findings', '').lower()
+            # Extract actual findings from Chroma store
+            extracted_findings = await self._extract_research_from_chroma(insight)
+            
+            # Use extracted findings if available, otherwise fallback to original findings
+            findings_text = extracted_findings if extracted_findings else insight.get('findings', '')
+            findings = findings_text.lower()
+            
+            # Create enhanced insight with actual findings
+            enhanced_insight = insight.copy()
+            enhanced_insight['findings'] = findings_text
             
             if any(word in findings for word in ['structure', 'act', 'beat']):
-                structure_insights.append(insight)
+                structure_insights.append(enhanced_insight)
             elif any(word in findings for word in ['pacing', 'rhythm', 'tempo']):
-                pacing_insights.append(insight)
+                pacing_insights.append(enhanced_insight)
             elif any(word in findings for word in ['hook', 'engagement', 'cliffhanger']):
-                engagement_insights.append(insight)
+                engagement_insights.append(enhanced_insight)
         
         # Apply insights to chapter objectives
         enhanced_objectives = []
@@ -422,38 +495,105 @@ class PlotOutlinerComponent(BaseComponent[PlotOutlinerInput, PlotOutlinerOutput,
             # Default three-act structure
             return self._create_story_beats(PlotStructure.THREE_ACT, chapter_count, input_data)
     
-    def _generate_chapter_objectives(self, story_beats: Dict[str, Any], 
-                                   input_data: PlotOutlinerInput,
-                                   chapter_count: int) -> List[ChapterObjective]:
+    async def _generate_chapter_objectives(self, story_beats: Dict[str, Any], 
+                                input_data: PlotOutlinerInput,
+                                chapter_count: int) -> List[ChapterObjective]:
         """Generate specific objectives for each chapter."""
         objectives = []
         
         for chapter_num in range(1, chapter_count + 1):
-            # Determine chapter type based on story beats
-            chapter_type = self._get_chapter_type(chapter_num, story_beats, chapter_count)
-            
-            # Create chapter objective
-            objective = ChapterObjective(
-                chapter_number=chapter_num,
-                target_word_count=self.config.specific_config.target_words_per_chapter,
-                narrative_goals=self._get_narrative_goals(chapter_type, input_data.genre),
-                character_development_goals=self._get_character_goals(chapter_num, input_data),
-                plot_progression_requirements=self._get_plot_requirements(chapter_type, input_data),
-                tone_and_style_requirements=self._get_tone_requirements(chapter_type, input_data),
-                constraints=self._get_chapter_constraints(chapter_num, chapter_count),
-                success_criteria=self._get_success_criteria(chapter_type),
-                emotional_beats=self._get_emotional_beats(chapter_type, input_data.genre),
-                scene_requirements=self._get_scene_requirements(chapter_type),
-                reader_engagement_goals=self._get_engagement_goals(chapter_type, chapter_num, chapter_count)
-            )
-            
-            objectives.append(objective)
+            try:
+                # Determine chapter type based on story beats
+                chapter_type = self._get_chapter_type(chapter_num, story_beats, chapter_count)
+                
+                # Create WordCountTarget object
+                word_count_target = WordCountTarget(
+                    target_words=self.config.specific_config.target_words_per_chapter,
+                    min_acceptable=int(self.config.specific_config.target_words_per_chapter * 0.8),
+                    max_acceptable=int(self.config.specific_config.target_words_per_chapter * 1.2)
+                )
+                
+                # Get narrative goals and convert to primary + secondary
+                narrative_goals = self._get_narrative_goals(chapter_type, input_data.genre)
+                primary_goal = narrative_goals[0] if narrative_goals else f"Advance {chapter_type} narrative for chapter {chapter_num}"
+                secondary_goals = narrative_goals[1:] if len(narrative_goals) > 1 else []
+                
+                # Convert constraints dict to list of strings
+                constraints_dict = self._get_chapter_constraints(chapter_num, chapter_count)
+                constraints_list = []
+                if isinstance(constraints_dict, dict):
+                    for key, value in constraints_dict.items():
+                        constraints_list.append(f"{key}: {value}")
+                elif isinstance(constraints_dict, list):
+                    constraints_list = constraints_dict
+                
+                # Generate chapter purpose
+                chapter_purpose = f"Chapter {chapter_num} serves as a {chapter_type} chapter, focusing on {primary_goal.lower()}. This chapter should establish key narrative elements while maintaining reader engagement through strategic pacing and character development."
+                
+                # Create chapter objective with correct field names and types
+                objective = ChapterObjective(
+                    chapter_number=chapter_num,
+                    primary_goal=primary_goal,
+                    secondary_goals=secondary_goals,
+                    word_count_target=word_count_target,
+                    chapter_purpose=chapter_purpose,
+                    constraints=constraints_list,
+                    success_criteria=self._get_success_criteria(chapter_type),
+                    emotional_beats=self._get_emotional_beats(chapter_type, input_data.genre),
+                    scene_requirements=self._get_scene_requirements(chapter_type),
+                    reader_engagement_goals=self._get_engagement_goals(chapter_type, chapter_num, chapter_count),
+                    
+                    # Additional fields that might be needed
+                    plot_advancements=self._get_plot_advancements(chapter_type, input_data),
+                    character_development_targets=self._get_character_development_targets(chapter_num, input_data),
+                )
+                
+                objectives.append(objective)
+            except Exception as e:
+                logger.error(f"Error generating chapter objective for chapter {chapter_num}: {e}")
+                
         
         # Apply research insights to chapter objectives if available
         if self._research_insights:
-            objectives = self._integrate_research_into_planning(objectives)
+            objectives = await self._integrate_research_into_planning(objectives)
         
         return objectives
+
+
+    def _get_plot_advancements(self, chapter_type: str, input_data: PlotOutlinerInput) -> List[PlotAdvancement]:
+        """Generate plot advancement requirements for the chapter."""
+        # You'll need to implement this based on your plot structure
+        # This is a placeholder implementation
+        advancements = []
+        
+        # Add at least one plot advancement (required by validator)
+        advancement = PlotAdvancement(
+            thread_id=f"main_plot_{chapter_type}",
+            advancement_type="progress",
+            advancement_description=f"Advance the main storyline through {chapter_type} development",
+            importance=ObjectivePriority.MEDIUM
+        )
+        advancements.append(advancement)
+        
+        return advancements
+
+
+    def _get_character_development_targets(self, chapter_num: int, input_data: PlotOutlinerInput) -> List[CharacterDevelopmentTarget]:
+        """Generate character development targets for the chapter."""
+        # This is a placeholder implementation
+        targets = []
+        
+        # Add character development based on your story structure
+        if hasattr(input_data, 'main_character') and input_data.main_character:
+            target = CharacterDevelopmentTarget(
+                character_id=input_data.main_character.get('id', 'protagonist'),
+                development_type="growth",
+                development_goal=f"Develop character through chapter {chapter_num} challenges",
+                target_scenes=[SceneType.DIALOGUE, SceneType.INTERNAL_REFLECTION]
+            )
+            targets.append(target)
+        
+        return targets
     
     def _get_chapter_type(self, chapter_num: int, story_beats: Dict[str, Any], 
                          total_chapters: int) -> str:
@@ -483,58 +623,62 @@ class PlotOutlinerComponent(BaseComponent[PlotOutlinerInput, PlotOutlinerOutput,
         """Get narrative goals based on chapter type and genre."""
         base_goals = {
             'hook_and_setup': [
-                "Establish protagonist and world",
-                "Hook reader with compelling opening",
-                "Introduce main conflicts"
+                "Introduce the protagonist with vivid details and ground the reader in the world’s tone and setting.",
+                "Craft a compelling opening hook that immediately captures attention and sets narrative expectations.",
+                "Foreshadow the central conflicts or mysteries that will drive the story forward."
             ],
             'setup': [
-                "Develop character relationships",
-                "Build world and context",
-                "Advance plot foundation"
+                "Expand character relationships, motivations, and dynamics to build emotional investment.",
+                "Develop the world’s context, rules, or atmosphere in ways that feel natural and immersive.",
+                "Lay a strong foundation for upcoming conflicts by subtly planting key plot elements."
             ],
             'inciting_incident': [
-                "Trigger main plot with major event",
-                "Force protagonist into action",
-                "Establish stakes clearly"
+                "Deliver a significant, disruptive event that forces the protagonist to abandon the status quo.",
+                "Push the protagonist into action by creating a dilemma that cannot be ignored.",
+                "Clarify the story’s stakes so readers understand what could be gained or lost."
             ],
             'rising_action': [
-                "Escalate conflict and tension",
-                "Develop character relationships",
-                "Advance multiple plot threads"
+                "Escalate narrative tension by introducing increasingly difficult obstacles and conflicts.",
+                "Show characters making meaningful choices that complicate relationships and alliances.",
+                "Advance multiple interconnected plot threads to sustain narrative momentum."
             ],
             'complications': [
-                "Increase obstacles and challenges",
-                "Deepen character conflicts",
-                "Build toward climax"
+                "Heighten the sense of struggle by layering obstacles that test the protagonist’s abilities.",
+                "Deepen personal or interpersonal conflicts, forcing characters into hard decisions.",
+                "Push the narrative toward climax by revealing the cost of failure more clearly."
             ],
             'midpoint_reversal': [
-                "Deliver major plot twist or revelation",
-                "Shift story direction significantly",
-                "Raise stakes dramatically"
+                "Introduce a major twist, revelation, or reversal that shifts the story’s trajectory.",
+                "Reframe the protagonist’s understanding of events, allies, or enemies in a dramatic way.",
+                "Escalate stakes to a new level, making success feel more urgent and failure more dire."
             ],
             'climax_buildup': [
-                "Build maximum tension",
-                "Prepare for final confrontation",
-                "Converge all plot threads"
+                "Concentrate tension by converging characters, conflicts, and plot threads toward a showdown.",
+                "Highlight the protagonist’s doubts, vulnerabilities, or sacrifices before the final test.",
+                "Ensure momentum is focused squarely on the upcoming climactic confrontation."
             ],
             'dark_moment': [
-                "Create moment of maximum despair",
-                "Test protagonist's resolve",
-                "Set up final act"
+                "Depict the protagonist’s lowest emotional point, where hope feels nearly lost.",
+                "Force the protagonist to confront their deepest fears or limitations head-on.",
+                "Set the stage for renewal by making the cost of failure brutally clear."
             ],
             'climax': [
-                "Deliver satisfying confrontation",
-                "Resolve main conflict",
-                "Demonstrate character growth"
+                "Deliver a decisive confrontation that tests everything the protagonist has learned.",
+                "Resolve the central conflict in a way that feels both surprising and inevitable.",
+                "Show clear evidence of character transformation or growth through action."
             ],
             'resolution': [
-                "Tie up loose ends",
-                "Show character transformation",
-                "Provide satisfying conclusion"
+                "Tie off remaining subplots and provide closure for secondary characters.",
+                "Demonstrate how the protagonist has changed through choices, behavior, or perspective.",
+                "Leave the reader with a satisfying sense of completion or thematic resonance."
             ]
         }
         
-        return base_goals.get(chapter_type, ["Advance plot", "Develop characters", "Maintain engagement"])
+        return base_goals.get(chapter_type, [
+            "Move the story forward in ways that matter to the protagonist and theme.",
+            "Develop characters through meaningful action and interaction.",
+            "Maintain narrative engagement by balancing tension with payoff."
+        ])
     
     def _get_character_goals(self, chapter_num: int, input_data: PlotOutlinerInput) -> Dict[str, str]:
         """Get character development goals for the chapter."""

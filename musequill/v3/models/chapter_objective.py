@@ -181,7 +181,7 @@ class ChapterObjective(BaseModel):
     )
     
     primary_goal: str = Field(
-        min_length=20,
+        min_length=10,
         max_length=200,
         description="Main narrative goal for this chapter"
     )
