@@ -16,6 +16,7 @@ import yaml
 # Import activity logger
 from musequill.v3.pipeline_activity_logger import PipelineActivityLogger
 
+from musequill.v3.utils.envs import substitute_env_vars
 
 async def save_pipeline_results(
     pipeline_results: Dict[str, Any],
@@ -37,7 +38,12 @@ async def save_pipeline_results(
     """
     logger = logging.getLogger('pipeline_integration.save')
     output_config = config.get('output', {})
-    base_dir = Path(output_config.get('base_directory', './output'))
+    od = output_config.get('base_directory')
+    if od is None:
+        od = './output'
+    else:
+        od = substitute_env_vars(od)
+    base_dir = Path(od)
     
     # Create output directory with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -443,7 +449,12 @@ async def setup_output_directory(output_config: Dict[str, Any]) -> Path:
     Returns:
         Path to the prepared output directory
     """
-    base_dir = Path(output_config.get('base_directory', './output'))
+    od = output_config.get('base_directory')
+    if od is None:
+        od = './output'
+    else:
+        od = substitute_env_vars(od)
+    base_dir = Path(od)
     base_dir.mkdir(parents=True, exist_ok=True)
     
     # Create subdirectories if specified
