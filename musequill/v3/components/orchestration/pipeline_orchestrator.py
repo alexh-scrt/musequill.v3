@@ -23,7 +23,8 @@ from musequill.v3.models.chapter_variant import ChapterVariant
 from musequill.v3.models.dynamic_story_state import DynamicStoryState
 from musequill.v3.models.market_intelligence import MarketIntelligence
 from musequill.v3.components.market_intelligence.market_intelligence_engine import MarketIntelligenceEngineConfig
-from musequill.v3.components.generators.chapter_generator import ChapterGeneratorInput, ChapterGeneratorOutput
+from musequill.v3.components.generators.chapter_generator import ChapterGeneratorInput, ChapterGeneratorOutput, ChapterGeneratorConfig
+from musequill.v3.components.generators.plot_outliner import PlotOutlinerConfig, PlotOutlinerComponent
 from musequill.v3.components.discriminators.plot_coherence_critic import PlotCoherenceCriticInput
 from musequill.v3.components.discriminators.literary_quality_critic import LiteraryQualityCriticInput
 from musequill.v3.components.discriminators.reader_engagement_critic import ReaderEngagementCriticInput
@@ -229,6 +230,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         
         # Component references
         self._chapter_generator = None
+        self._plot_outliner = None
         self._plot_coherence_critic = None
         self._literary_quality_critic = None
         self._reader_engagement_critic = None
@@ -469,6 +471,17 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 await self._chapter_generator.initialize()
                 await self._chapter_generator.start()
             
+            # Initialize Plot Outliner
+            if 'plot_outliner' in component_configs:
+                outliner_id = component_registry.create_component(
+                    'plot_outliner', 
+                    component_configs['plot_outliner']
+                )
+                self._plot_outliner = component_registry.get_component(outliner_id)
+                await self._plot_outliner.initialize()
+                await self._plot_outliner.start()
+
+
             # Initialize Critics
             if 'plot_coherence_critic' in component_configs:
                 critic_id = component_registry.create_component(
@@ -572,10 +585,15 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
                 recycle_on_error_count=3,
                 specific_config=character_dev_config
             ),
+            'plot_outliner': ComponentConfiguration(
+                component_type=ComponentType.GENERATOR,
+                component_name="Plot Outliner",
+                specific_config=PlotOutlinerConfig(**config['generators']['plot_outliner'])  # Assuming PlotOutlinerConfig is defined config['generators']['plot_outliner']  # Would contain actual config
+            ),
             'chapter_generator': ComponentConfiguration(
                 component_type=ComponentType.GENERATOR,
                 component_name="Chapter Generator",
-                specific_config={}  # Would contain actual config
+                specific_config=ChapterGeneratorConfig(**config['generators']['chapter_generator'])  # Assuming ChapterGeneratorConfig is defined config['generators']['chapter_generator']
             ),
             'plot_coherence_critic': ComponentConfiguration(
                 component_type=ComponentType.DISCRIMINATOR,
@@ -617,6 +635,7 @@ class PipelineOrchestrator(BaseComponent[PipelineOrchestratorInput, PipelineExec
         
         components = [
             ('chapter_generator', self._chapter_generator),
+            ('plot_outliner', self._plot_outliner),
             ('plot_coherence_critic', self._plot_coherence_critic),
             ('literary_quality_critic', self._literary_quality_critic),
             ('reader_engagement_critic', self._reader_engagement_critic),

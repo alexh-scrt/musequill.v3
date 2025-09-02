@@ -13,7 +13,9 @@ from musequill.v3.components.base.component_interface import (
 )
 
 # Import existing component classes
+from musequill.v3.components.orchestration.pipeline_researcher import ResearchableMixin
 from musequill.v3.components.generators.chapter_generator import ChapterGenerator, ChapterGeneratorConfig
+from musequill.v3.components.generators.plot_outliner import PlotOutlinerComponent
 from musequill.v3.components.discriminators.plot_coherence_critic import PlotCoherenceCritic, PlotCoherenceCriticConfig
 from musequill.v3.components.quality_control.comprehensive_quality_controller import ComprehensiveQualityController, QualityControllerConfig
 from musequill.v3.components.researcher.researcher_agent import ResearcherComponent, ResearcherConfig
@@ -41,6 +43,94 @@ from musequill.v3.components.character_developer.character_developer import (
     CharacterDevelopmentComponent
 )
 
+"""
+Component Registry Fix for ResearchableMixin Support
+
+This shows how to modify your component registry to use the research-enabled
+chapter generator, fixing the isinstance(chapter_component, ResearchableMixin) check.
+"""
+
+# In your musequill/v3/components/component_registry.py file, 
+# add this import and modify the registration:
+
+from musequill.v3.components.generators.research_chapter_generator import (
+    ResearchEnabledChapterGenerator, 
+    make_chapter_generator_researchable
+)
+
+def register_research_enabled_components() -> bool:
+    """Register components with ResearchableMixin support."""
+    try:
+        # Register the research-enabled chapter generator instead of the basic one
+        component_registry.register_component_type(
+            "chapter_generator", 
+            ResearchEnabledChapterGenerator  # Use research-enabled version
+        )
+        print("✅ ResearchEnabledChapterGenerator registered successfully")
+        
+        # Register other components as normal
+        component_registry.register_component_type("plot_coherence_critic", PlotCoherenceCritic)
+        component_registry.register_component_type("literary_quality_critic", LiteraryQualityCritic)
+        component_registry.register_component_type("reader_engagement_critic", ReaderEngagementCritic)
+        component_registry.register_component_type("quality_controller", ComprehensiveQualityController)
+        component_registry.register_component_type("researcher", ResearcherComponent)
+        component_registry.register_component_type("market_intelligence", MarketIntelligenceEngine)
+        component_registry.register_component_type("llm_discriminator", LLMDiscriminator)
+        
+        return True
+    except Exception as e:
+        print(f"❌ Failed to register research-enabled components: {e}")
+        return False
+
+
+# Alternative: Monkey-patch existing instances
+def upgrade_existing_chapter_generator_to_researchable():
+    """
+    Upgrade an existing ChapterGenerator instance to support ResearchableMixin.
+    Use this if you can't modify the registry setup.
+    """
+    # Get existing chapter generator from registry
+    components = component_registry.list_components()
+    
+    for comp_id, comp_info in components.items():
+        if comp_info.get('type') == 'chapter_generator':
+            existing_generator = component_registry.get_component(comp_id)
+            
+            if existing_generator and not isinstance(existing_generator, ResearchableMixin):
+                # Upgrade to research-enabled version
+                enhanced_generator = make_chapter_generator_researchable(existing_generator)
+                
+                # Replace in registry (if possible)
+                # Note: This may require registry modifications to support replacement
+                print(f"Upgraded chapter generator {comp_id} to ResearchableMixin support")
+                return enhanced_generator
+    
+    return None
+
+
+# In your enhanced_pipeline_orchestrator.py initialization, add this:
+def ensure_researchable_chapter_generator(orchestrator):
+    """
+    Ensure the orchestrator has a research-enabled chapter generator.
+    Call this during orchestrator initialization.
+    """
+    # Check if chapter generator supports ResearchableMixin
+    chapter_component = orchestrator.get_component('chapter_generator')
+    
+    if chapter_component and not isinstance(chapter_component, ResearchableMixin):
+        print("WARNING: ChapterGenerator doesn't support ResearchableMixin, upgrading...")
+        
+        # Create research-enabled version
+        enhanced_generator = make_chapter_generator_researchable(chapter_component)
+        
+        # Replace the component in orchestrator's components dict
+        orchestrator.components['chapter_generator'] = enhanced_generator
+        orchestrator._chapter_generator = enhanced_generator
+        
+        print("✅ ChapterGenerator upgraded to ResearchableMixin support")
+    
+    return chapter_component
+
 def register_llm_discriminator_component() -> bool:
     """Register the LLM Discriminator component specifically."""
     try:
@@ -57,8 +147,8 @@ def register_existing_components() -> bool:
     """Register only the existing component types (for current testing)."""
     try:
         # Register Generator components
-        component_registry.register_component_type("chapter_generator", ChapterGenerator)
-        
+        component_registry.register_component_type("chapter_generator", ResearchEnabledChapterGenerator)
+        component_registry.register_component_type('plot_outliner', PlotOutlinerComponent)
         # Register Discriminator components  
         component_registry.register_component_type("plot_coherence_critic", PlotCoherenceCritic)
         component_registry.register_component_type('literary_quality_critic', LiteraryQualityCritic)

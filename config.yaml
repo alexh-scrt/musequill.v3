@@ -7,6 +7,72 @@ pipeline:
   max_generation_attempts: 5
   max_revision_cycles: 3
 
+# Plot outliner
+# Plot Outliner Configuration
+# Add this section to your config.yaml file
+
+plot_outliner:
+  # Chapter Planning
+  default_chapter_count: 12
+  target_words_per_chapter: 3000
+  min_words_per_chapter: 2000
+  max_words_per_chapter: 5000
+  
+  # Plot Structure
+  plot_structure: "three_act"  # three_act, heros_journey, five_act, freytag_pyramid, save_the_cat, mystery, romance, thriller
+  pacing_style: "balanced"     # fast, balanced, slow, literary
+  
+  # Story Elements
+  cliffhanger_frequency: 0.7   # 0.0 to 1.0 - percentage of chapters with cliffhangers
+  character_development_weight: 0.6  # 0.0 to 1.0 - emphasis on character vs plot
+  
+  # Genre-Specific Adjustments
+  genre_chapter_adjustments:
+    thriller: 0      # No adjustment from default
+    mystery: 2       # Add 2 chapters for complexity
+    romance: -2      # Reduce 2 chapters, more focused
+    fantasy: 5       # Add 5 chapters for world-building
+    sci-fi: 3        # Add 3 chapters for concept exploration
+    literary: -3     # Reduce 3 chapters, more focused
+    horror: -1       # Reduce 1 chapter, concentrated tension
+    adventure: 2     # Add 2 chapters for journey
+    historical: 4    # Add 4 chapters for period detail
+  
+  # Story Beat Timing (percentage of story)
+  three_act_structure:
+    act_1_end: 0.25         # End of Act 1 at 25% 
+    midpoint: 0.5           # Midpoint reversal at 50%
+    act_2_end: 0.75         # End of Act 2 at 75%
+    climax: 0.85            # Climax at 85%
+    resolution: 1.0         # Resolution at end
+  
+  # Chapter Types and Requirements
+  chapter_types:
+    opening:
+      required_scenes: ["hook", "character_introduction", "world_establishment"]
+      emotional_beats: ["tension_build", "intrigue"]
+      engagement_priority: "high"
+    
+    development:
+      required_scenes: ["dialogue", "character_growth", "plot_advancement"]
+      emotional_beats: ["tension_build", "character_bonding"]
+      engagement_priority: "medium"
+    
+    turning_point:
+      required_scenes: ["confrontation", "revelation", "decision"]
+      emotional_beats: ["shock", "tension_build", "fear"]
+      engagement_priority: "critical"
+    
+    climax:
+      required_scenes: ["action", "confrontation", "resolution"]
+      emotional_beats: ["tension_build", "triumph", "relief"]
+      engagement_priority: "critical"
+    
+    resolution:
+      required_scenes: ["dialogue", "reflection", "closure"]
+      emotional_beats: ["relief", "hope", "satisfaction"]
+      engagement_priority: "high"
+
 # Research settings  
 research:
   enable_research_integration: true
@@ -68,7 +134,18 @@ components:
     enable_comprehensive_logging: "${ENABLE_LOGGING:true}"
     fallback_on_component_failure: "${ENABLE_FALLBACK:true}"
   generators:
-    chapter_writer:
+    plot_outliner:
+      component_type: "generator"
+      priority: "high"
+      timeout_seconds: 120
+      enable_research: true
+      enable_market_intelligence: true
+      
+      # Component-specific overrides (optional)
+      default_chapter_count: 12  # Can override global setting
+      plot_structure: "three_act"
+      pacing_style: "balanced"
+    chapter_generator:
       weight: "${CHAPTER_WRITER_WEIGHT:0.5}"
       model: "${CHAPTER_WRITER_MODEL:llama3.3:70b}"
       temperature: "${CHAPTER_WRITER_TEMPERATURE:0.2}"

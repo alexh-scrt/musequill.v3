@@ -51,6 +51,10 @@ from musequill.v3.models.character_arc import (
     NarrativeFunction
 )
 
+from musequill.v3.components.generators.plot_outliner import (
+    PlotOutlinerInput, PlotOutlinerOutput
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -204,6 +208,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         # Build components dictionary from individual component references        
         self.components  = {
             'chapter_generator': self._chapter_generator,
+            'plot_outliner': self._plot_outliner,
             'plot_coherence_critic': self._plot_coherence_critic,
             'literary_quality_critic': self._literary_quality_critic,
             'reader_engagement_critic': self._reader_engagement_critic,
@@ -862,14 +867,16 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
         
         # Execute plot outline component
         plot_component = self.get_component('plot_outliner')
-        if plot_component:
+        if plot_component and isinstance(plot_component, ResearchableMixin):
             plot_input = {
+                'story_config': config,
                 'genre': genre,
                 'plot_type': plot_type,
                 'market_intelligence': story_state.get('market_intelligence', {}),
                 'research_insights': plot_research.results if plot_research.status == "completed" else None
             }
-            plot_result = await plot_component.execute(plot_input)
+            plot_outliner_input = PlotOutlinerInput(**plot_input)
+            plot_result = await plot_component.process(plot_outliner_input)
             story_state['plot_outline'] = plot_result
         
         return story_state
@@ -1180,7 +1187,7 @@ class EnhancedPipelineOrchestrator(PipelineOrchestrator):
                 'genre': genre,
                 'story_state': story_state
             }
-            chapter_result = await chapter_component.execute(chapter_input)
+            chapter_result = await chapter_component.process(chapter_input)
             story_state['chapters'] = chapter_result
         
         return story_state
